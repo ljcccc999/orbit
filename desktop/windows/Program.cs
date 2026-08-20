@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using Microsoft.Win32;
 using Microsoft.Web.WebView2.WinForms;
 
 namespace OrbitDesktop;
@@ -8,23 +10,124 @@ namespace OrbitDesktop;
 internal static class Program
 {
     private static readonly Uri OrbitUri = new("http://127.0.0.1:8765");
+    private const string MutexName = @"Local\OrbitDesktop";
+    private const string ShowEventName = @"Local\OrbitDesktopShow";
 
     [STAThread]
     private static void Main()
     {
+        using var mutex = new Mutex(true, MutexName, out var firstInstance);
+        if (!firstInstance)
+        {
+            try { using var signal = EventWaitHandle.OpenExisting(ShowEventName); signal.Set(); } catch { }
+            return;
+        }
+
+        using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
         ApplicationConfiguration.Initialize();
-        Application.Run(new OrbitForm());
+        Application.Run(new OrbitForm(showEvent));
     }
 
     private sealed class OrbitForm : Form
     {
         private readonly Label status = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Text = "Preparing Orbit…", Font = new Font("Segoe UI", 12) };
         private readonly WebView2 web = new() { Dock = DockStyle.Fill, Visible = false };
+        private readonly NotifyIcon tray;
+        private bool explicitExit;
 
-        public OrbitForm()
+        public OrbitForm(EventWaitHandle showEvent)
         {
             Text = "Orbit"; Width = 1180; Height = 780; MinimumSize = new Size(820, 600); StartPosition = FormStartPosition.CenterScreen;
-            Controls.Add(web); Controls.Add(status); Shown += async (_, _) => await PrepareAsync();
+            Controls.Add(web); Controls.Add(status);
+            var icon = LoadOrbitIcon();
+            Icon = icon;
+            tray = new NotifyIcon
+            {
+                Icon = icon,
+                Text = "Orbit · Local AI",
+                Visible = true,
+                ContextMenuStrip = BuildTrayMenu(),
+            };
+            tray.DoubleClick += (_, _) => ShowOrbit();
+            Shown += async (_, _) => await PrepareAsync();
+            FormClosing += OnFormClosing;
+            Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) HideToTray(); };
+            RegisterStartup();
+            _ = Task.Run(() => WaitForShow(showEvent));
+        }
+
+        private ContextMenuStrip BuildTrayMenu()
+        {
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("Open Orbit", null, (_, _) => ShowOrbit());
+            menu.Items.Add(new ToolStripMenuItem("Local API · 127.0.0.1:8765") { Enabled = false });
+            menu.Items.Add("Unload Model", null, async (_, _) => await RunOrbitQuietlyAsync("unload"));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Exit Orbit", null, async (_, _) => await ExitOrbitAsync());
+            return menu;
+        }
+
+        private static Icon LoadOrbitIcon()
+        {
+            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("OrbitDesktop.orbit-logo.png") ?? throw new Exception("Orbit logo is missing.");
+            using var bitmap = new Bitmap(stream);
+            var handle = bitmap.GetHicon();
+            try { using var temporary = Icon.FromHandle(handle); return (Icon)temporary.Clone(); }
+            finally { DestroyIcon(handle); }
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern bool DestroyIcon(IntPtr handle);
+
+        private void WaitForShow(EventWaitHandle showEvent)
+        {
+            while (!IsDisposed)
+            {
+                showEvent.WaitOne();
+                if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)ShowOrbit);
+            }
+        }
+
+        private void ShowOrbit()
+        {
+            ShowInTaskbar = true;
+            Show();
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Activate();
+            BringToFront();
+        }
+
+        private void HideToTray()
+        {
+            Hide();
+            ShowInTaskbar = false;
+        }
+
+        private void OnFormClosing(object? sender, FormClosingEventArgs eventArgs)
+        {
+            if (eventArgs.CloseReason == CloseReason.WindowsShutDown)
+            {
+                explicitExit = true;
+                tray.Visible = false;
+                return;
+            }
+            if (!explicitExit)
+            {
+                eventArgs.Cancel = true;
+                HideToTray();
+            }
+        }
+
+        private static void RegisterStartup()
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            key?.SetValue("Orbit", $"\"{Application.ExecutablePath}\"");
+        }
+
+        private static void UnregisterStartup()
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+            key?.DeleteValue("Orbit", throwOnMissingValue: false);
         }
 
         private static async Task<bool> HealthyAsync()
@@ -46,6 +149,25 @@ internal static class Program
             if (process.ExitCode != 0) throw new Exception($"Orbit setup failed ({process.ExitCode}).");
         }
 
+        private static string OrbitExecutable() => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Orbit", "runtime", "Scripts", "orbit.exe");
+
+        private async Task RunOrbitQuietlyAsync(string arguments)
+        {
+            var orbit = OrbitExecutable();
+            if (!File.Exists(orbit)) return;
+            try { await RunAsync(orbit, arguments); } catch { }
+        }
+
+        private async Task ExitOrbitAsync()
+        {
+            UnregisterStartup();
+            await RunOrbitQuietlyAsync("service uninstall");
+            tray.Visible = false;
+            explicitExit = true;
+            Close();
+            Application.Exit();
+        }
+
         private static string ExtractInstaller()
         {
             var path = Path.Combine(Path.GetTempPath(), $"orbit-install-{Guid.NewGuid():N}.ps1");
@@ -59,7 +181,7 @@ internal static class Program
             {
                 if (!await HealthyAsync())
                 {
-                    var orbit = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Orbit", "runtime", "Scripts", "orbit.exe");
+                    var orbit = OrbitExecutable();
                     if (File.Exists(orbit)) await RunAsync(orbit, "start");
                     else
                     {

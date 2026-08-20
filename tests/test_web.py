@@ -54,6 +54,22 @@ def test_http_health_models_and_openai_chat(tmp_path):
             payload = json.loads(response.read())
             assert payload["object"] == "chat.completion"
             assert payload["model"] == "orbit-test"
+        request = urllib.request.Request(
+            base + "/v1/responses",
+            data=json.dumps({
+                "model": "orbit-test",
+                "input": "hello",
+                "max_output_tokens": 1,
+                "temperature": 0,
+            }).encode(),
+            headers={"Content-Type": "application/json", **headers},
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            payload = json.loads(response.read())
+            assert payload["object"] == "response"
+            assert payload["status"] == "completed"
+            assert payload["model"] == "orbit-test"
     finally:
         server.shutdown()
         server.server_close()

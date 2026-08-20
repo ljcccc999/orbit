@@ -11,6 +11,7 @@ lipo -create "$OUTPUT/Orbit-arm64" "$OUTPUT/Orbit-x86_64" -output "$APP/Contents
 rm -f "$OUTPUT/Orbit-arm64" "$OUTPUT/Orbit-x86_64"
 cp "$ROOT/desktop/macos/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/install.sh" "$APP/Contents/Resources/install.sh"
+cp "$ROOT/orbit/static/orbit-logo.png" "$APP/Contents/Resources/orbit-logo.png"
 ICONSET="$OUTPUT/Orbit.iconset"
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"

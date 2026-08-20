@@ -2,16 +2,22 @@ import AppKit
 import WebKit
 
 private let orbitURL = URL(string: "http://127.0.0.1:8765")!
+private let desktopAgentLabel = "top.orbit.desktop"
 
-@main
-final class OrbitApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var statusLabel: NSTextField!
     private var spinner: NSProgressIndicator!
+    private var statusItem: NSStatusItem!
+    private var terminationInProgress = false
+    private var systemIsShuttingDown = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        installLoginAgent()
+        observeShutdown()
+        buildStatusItem()
         buildWindow()
         NSApp.activate(ignoringOtherApps: true)
         Task { await prepareOrbit() }
@@ -20,12 +26,75 @@ final class OrbitApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { window.makeKeyAndOrderFront(nil) }
+        showWindow()
         return true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if terminationInProgress { return .terminateLater }
+        terminationInProgress = true
+        if !systemIsShuttingDown { removeLoginAgent() }
+        Task {
+            await uninstallOrbitService()
+            await MainActor.run { sender.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
+        return false
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        guard let sender = notification.object as? NSWindow else { return }
+        sender.deminiaturize(nil)
+        sender.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    private func observeShutdown() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willPowerOffNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in self?.systemIsShuttingDown = true }
+    }
+
+    private func buildStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = statusItem.button {
+            if let path = Bundle.main.path(forResource: "orbit-logo", ofType: "png"),
+               let image = NSImage(contentsOfFile: path) {
+                image.size = NSSize(width: 18, height: 18)
+                button.image = image
+            } else {
+                button.image = NSImage(systemSymbolName: "circle.dotted", accessibilityDescription: "Orbit")
+            }
+            button.toolTip = "Orbit"
+        }
+
+        let menu = NSMenu()
+        let open = NSMenuItem(title: "Open Orbit", action: #selector(openOrbit), keyEquivalent: "o")
+        open.target = self
+        menu.addItem(open)
+        let api = NSMenuItem(title: "Local API · 127.0.0.1:8765", action: nil, keyEquivalent: "")
+        api.isEnabled = false
+        menu.addItem(api)
+        let unload = NSMenuItem(title: "Unload Model", action: #selector(unloadModel), keyEquivalent: "u")
+        unload.target = self
+        menu.addItem(unload)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit Orbit", action: #selector(quitOrbit), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+        statusItem.menu = menu
     }
 
     private func buildWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.delegate = self
         window.title = "Orbit"
         window.titlebarAppearsTransparent = true
         window.center()
@@ -61,6 +130,20 @@ final class OrbitApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
+    @objc private func openOrbit() { showWindow() }
+
+    private func showWindow() {
+        NSApp.setActivationPolicy(.regular)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func unloadModel() {
+        Task { try? await runOrbit(["unload"]) }
+    }
+
+    @objc private func quitOrbit() { NSApp.terminate(nil) }
+
     @MainActor private func setStatus(_ text: String) { statusLabel.stringValue = text }
 
     private func isHealthy() async -> Bool {
@@ -87,21 +170,62 @@ final class OrbitApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             process.terminationHandler = { task in
                 pipe.fileHandleForReading.readabilityHandler = nil
                 if task.terminationStatus == 0 { continuation.resume() }
-                else { continuation.resume(throwing: NSError(domain: "Orbit", code: Int(task.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Orbit 安装失败（代码 \(task.terminationStatus)）"])) }
+                else { continuation.resume(throwing: NSError(domain: "Orbit", code: Int(task.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Orbit command failed (\(task.terminationStatus))"])) }
             }
             do { try process.run() } catch { continuation.resume(throwing: error) }
         }
     }
 
+    private func orbitExecutable() -> String {
+        FileManager.default.homeDirectoryForCurrentUser.appending(path: ".orbit/runtime/bin/orbit").path
+    }
+
+    private func runOrbit(_ arguments: [String]) async throws {
+        let executable = orbitExecutable()
+        guard FileManager.default.isExecutableFile(atPath: executable) else { return }
+        try await run(executable, arguments)
+    }
+
+    private func uninstallOrbitService() async {
+        try? await runOrbit(["service", "uninstall"])
+    }
+
+    private func loginAgentPath() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/LaunchAgents/\(desktopAgentLabel).plist")
+    }
+
+    private func installLoginAgent() {
+        guard let executable = Bundle.main.executablePath else { return }
+        let path = loginAgentPath()
+        let payload: [String: Any] = [
+            "Label": desktopAgentLabel,
+            "ProgramArguments": [executable],
+            "RunAtLoad": true,
+            "ProcessType": "Interactive",
+        ]
+        do {
+            try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = try PropertyListSerialization.data(fromPropertyList: payload, format: .xml, options: 0)
+            try data.write(to: path, options: .atomic)
+        } catch {
+            NSLog("Could not register Orbit login item: %@", error.localizedDescription)
+        }
+    }
+
+    private func removeLoginAgent() {
+        try? FileManager.default.removeItem(at: loginAgentPath())
+    }
+
     private func prepareOrbit() async {
         if !(await isHealthy()) {
-            let orbit = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".orbit/runtime/bin/orbit").path
+            let orbit = orbitExecutable()
             do {
                 if FileManager.default.isExecutableFile(atPath: orbit) {
-                    await setStatus("正在启动本机 API…")
+                    setStatus("正在启动本机 API…")
                     try await run(orbit, ["start"])
                 } else {
-                    await setStatus("首次启动：正在安装本机 AI 运行时…")
+                    setStatus("首次启动：正在安装本机 AI 运行时…")
                     guard let installer = Bundle.main.path(forResource: "install", ofType: "sh") else { throw NSError(domain: "Orbit", code: 1, userInfo: [NSLocalizedDescriptionKey: "安装器缺失"]) }
                     try await run("/usr/bin/env", ["ORBIT_NO_BROWSER=1", "/bin/sh", installer]) { line in Task { @MainActor in self.statusLabel.stringValue = line } }
                 }
@@ -110,16 +234,27 @@ final class OrbitApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
                     try await Task.sleep(for: .milliseconds(250))
                 }
             } catch {
-                await setStatus("无法启动 Orbit：\(error.localizedDescription)")
+                setStatus("无法启动 Orbit：\(error.localizedDescription)")
                 return
             }
         }
-        guard await isHealthy() else { await setStatus("本机 API 未能启动，请重新打开 Orbit"); return }
+        guard await isHealthy() else { setStatus("本机 API 未能启动，请重新打开 Orbit"); return }
         await MainActor.run {
             webView.load(URLRequest(url: orbitURL))
             webView.isHidden = false
             spinner.isHidden = true
             statusLabel.isHidden = true
         }
+    }
+}
+
+@main
+private enum OrbitMain {
+    private static let delegate = OrbitApp()
+
+    static func main() {
+        let application = NSApplication.shared
+        application.delegate = delegate
+        application.run()
     }
 }

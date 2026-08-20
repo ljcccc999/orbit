@@ -16,6 +16,7 @@ Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对�
 - 提供约 300M 到 38B 参数的架构预设。
 - 分配模型前检查本机内存。
 - 在 macOS、Linux 和 Windows 上运行可崩溃恢复的后台 API。
+- 关闭窗口后仍在 macOS 菜单栏或 Windows/Linux 系统托盘常驻；只有选择“退出 Orbit”才停止本地服务。
 - 按需加载模型；空闲五分钟后自动卸载权重并释放加速器缓存。
 - 可使用 DeepSeek 或其他 OpenAI 兼容 API 生成监督数据，然后自动进入本机训练。
 - 将本机训练的 checkpoint 保存在 `~/.orbit/models`。
@@ -35,7 +36,9 @@ Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对�
 
 ### 桌面 App
 
-下载最新的 [macOS 通用 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-macOS-universal.zip)、[Windows x64 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-x64.exe) 或 [Windows ARM64 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-arm64.exe)。双击 App 后会在图形界面中自动准备本机运行时，不需要打开命令行。
+下载最新的 [macOS 通用 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-macOS-universal.zip)、[Windows x64 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-x64.exe)、[Windows ARM64 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-arm64.exe)、[Linux x64 AppImage](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Linux-x64.AppImage) 或 [Linux ARM64 AppImage](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Linux-arm64.AppImage)。双击 App 后会在图形界面中自动准备本机运行时，不需要打开命令行。
+
+首次启动后，Orbit 会随用户登录自动运行。关闭或最小化窗口时，Orbit 会继续留在 macOS 右上角菜单栏、Windows 通知区域或 Linux 系统托盘中，本地 API 保持可用。只有从该菜单选择“退出 Orbit”，才会停止 API 并取消自动启动；以后手动打开 Orbit 会重新启用。
 
 当前公开构建还没有 Developer ID/Authenticode 正式签名和公证，因此 macOS Gatekeeper 或 Windows SmartScreen 在首次打开时可能要求用户明确确认。彻底去掉系统提示需要对应平台的代码签名证书，程序代码不能安全绕过。
 
@@ -121,6 +124,8 @@ print(response.choices[0].message.content)
 ```
 
 Orbit 会校验每一个 `/v1` 请求。首次启动会创建第一个随机 Key；API 页面可以继续生成多个 Key，并限定为全部模型或某一个 checkpoint。撤销其中一个 Key 不会影响其他智能体。
+
+API 按 OpenAI 的模型列表、非流式 Chat Completions 和非流式 Responses 请求/响应格式工作。把 OpenAI SDK 的 `base_url` 指向 Orbit 本地地址即可，调用这些接口不需要联网。
 
 ## 本地存储与隐私
 

@@ -16,6 +16,7 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Supports architecture presets from approximately 300M to 38B parameters.
 - Checks local memory before allocating a model.
 - Runs a crash-recovering background API on macOS, Linux, and Windows.
+- Keeps a native menu-bar or system-tray controller running when its window is closed; only **Quit Orbit** stops the local service.
 - Loads weights on demand and automatically unloads an idle model after five minutes.
 - Can use DeepSeek or another OpenAI-compatible API to generate a supervised dataset and then start local training.
 - Saves locally trained checkpoints under `~/.orbit/models`.
@@ -35,7 +36,9 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 
 ### Desktop apps
 
-Download the current [macOS universal app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-macOS-universal.zip), [Windows x64 app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-x64.exe), or [Windows ARM64 app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-arm64.exe). Open the app and it prepares the local runtime without opening a terminal.
+Download the current [macOS universal app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-macOS-universal.zip), [Windows x64 app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-x64.exe), [Windows ARM64 app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-arm64.exe), [Linux x64 AppImage](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Linux-x64.AppImage), or [Linux ARM64 AppImage](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Linux-arm64.AppImage). Open the app and it prepares the local runtime without opening a terminal.
+
+After the first launch, Orbit starts with the user's login. Closing or minimizing the window leaves Orbit in the macOS menu bar, Windows notification area, or Linux system tray and keeps the local API available. Choose **Quit Orbit** from that menu to stop the API and disable automatic startup; manually opening Orbit again re-enables it.
 
 The current public builds are not Developer ID/Authenticode signed or notarized. macOS Gatekeeper or Windows SmartScreen may therefore require an explicit first-open confirmation. Removing that system warning requires platform signing certificates; it is not something application code can safely bypass.
 
@@ -121,6 +124,8 @@ print(response.choices[0].message.content)
 ```
 
 Orbit authenticates every `/v1` request. The first random key is created on first launch; additional keys can be created in the API page and scoped to all models or one checkpoint. Revoking one key does not interrupt other agents.
+
+The API follows the OpenAI request and response shapes for model listing, non-streaming Chat Completions, and non-streaming Responses. Point an OpenAI SDK at Orbit's local `base_url`; no internet connection is used for those requests.
 
 ## Local storage and privacy
 

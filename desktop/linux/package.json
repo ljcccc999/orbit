@@ -1,0 +1,38 @@
+{
+  "name": "orbit-linux-desktop",
+  "version": "0.3.2",
+  "private": true,
+  "description": "Orbit local AI desktop app for Linux",
+  "main": "main.js",
+  "scripts": {
+    "dist": "electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "top.orbit.desktop",
+    "productName": "Orbit",
+    "artifactName": "Orbit-Linux-${arch}.${ext}",
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../install.sh",
+        "to": "install.sh"
+      },
+      {
+        "from": "../../orbit/static/orbit-logo.png",
+        "to": "orbit-logo.png"
+      }
+    ],
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Development",
+      "icon": "../../orbit/static/orbit-logo.png"
+    }
+  }
+}
