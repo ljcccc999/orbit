@@ -8,36 +8,58 @@
 
 # Orbit
 
-Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对话和 OpenAI 兼容 API 集中在同一个浏览器界面中。默认情况下，训练数据、模型和对话都保留在用户自己的电脑上。
+Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对话和 OpenAI 兼容 API 集中在同一个界面中。默认情况下，训练数据、模型和对话都保留在用户自己的电脑上。
 
 ## Orbit 可以做什么
 
 - 在浏览器中打开图形化训练和对话界面。
 - 提供约 300M 到 38B 参数的架构预设。
 - 分配模型前检查本机内存。
+- 在 macOS、Linux 和 Windows 上运行可崩溃恢复的后台 API。
+- 按需加载模型；空闲五分钟后自动卸载权重并释放加速器缓存。
+- 可使用 DeepSeek 或其他 OpenAI 兼容 API 生成监督数据，然后自动进入本机训练。
 - 将本机训练的 checkpoint 保存在 `~/.orbit/models`。
 - 为 CUDA GPU 服务器生成自包含训练任务包。
-- 通过 `GET /v1/models` 和 `POST /v1/chat/completions` 提供本地模型 API。
+- 通过 `GET /v1/models`、`POST /v1/chat/completions` 和 `POST /v1/responses` 提供本地模型 API。
+- 可生成多个随机、可撤销的 API Key，并把每个 Key 限定到某一个本地模型。
 - 让本机智能体通过 OpenAI 兼容配置接入。
 
 ## 运行要求
 
 - 系统内存必须大于 10GB；更大的模型需要更多内存。
-- Python 3.9 或更高版本。
-- macOS 或 Linux；正式训练建议使用 CUDA。
+- macOS、Linux 或 Windows；正式训练建议使用 CUDA。
+- 用户不必提前安装 Python。安装器会使用合适的现有 Python，或自动准备隔离的 Python 3.11 运行时。
 - 首次下载安装器和依赖时需要联网。完成后，训练、推理和本机 API 可以离线运行。
 
 ## 一行安装并启动
+
+### 桌面 App
+
+下载最新的 [macOS 通用 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-macOS-universal.zip)、[Windows x64 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-x64.exe) 或 [Windows ARM64 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-arm64.exe)。双击 App 后会在图形界面中自动准备本机运行时，不需要打开命令行。
+
+当前公开构建还没有 Developer ID/Authenticode 正式签名和公证，因此 macOS Gatekeeper 或 Windows SmartScreen 在首次打开时可能要求用户明确确认。彻底去掉系统提示需要对应平台的代码签名证书，程序代码不能安全绕过。
+
+### macOS 与 Linux 命令行
 
 ```bash
 curl --retry 5 --retry-delay 2 --connect-timeout 20 -fsSL https://raw.githubusercontent.com/ljcccc999/orbit/main/install.sh | sh
 ```
 
-安装器会检查内存，在 `~/.orbit/runtime` 创建隔离运行环境，安装 Orbit，启动本机服务并打开浏览器。以后执行 `orbit` 即可再次打开。
+安装器会检查内存，在 `~/.orbit/runtime` 创建隔离运行环境，安装 Orbit，启动本机服务并打开浏览器。以后执行 `orbit` 即可再次打开。网页只是管理客户端，关掉网页不会停止 OpenAI 兼容 API。
 
 下载中断后可以安全地重新执行同一条命令。安装器会继续使用已有的隔离环境，并自动重试网络下载。
 
 Orbit 默认只监听 `127.0.0.1:8765`，不会暴露给局域网或互联网。
+
+```bash
+orbit start
+orbit status
+orbit chat "你好"
+orbit unload
+orbit stop
+```
+
+macOS LaunchAgent 和 Linux 用户级 systemd 服务会在 Orbit 异常退出后重启。`orbit unload` 可立即释放当前模型；不手动执行时，默认空闲计时器也会自动卸载。
 
 ## 模型规模
 
@@ -58,12 +80,13 @@ Orbit 默认只监听 `127.0.0.1:8765`，不会暴露给局域网或互联网。
 
 1. **在本机开始训练**：只有通过内存检查后才会启动本地任务，checkpoint 保存在 `~/.orbit/models`。
 2. **生成远程 GPU 任务包**：下载一个 ZIP，其中包含数据集、配置、Orbit 源码和供 CUDA 机器执行的 `run.sh` 入口。
+3. **生成样本并自动训练**：调用 DeepSeek 或其他 OpenAI 兼容教师 API，生成的数据集保存在本机，然后进入同一套受保护的本机训练流程。API Key 只停留在本次请求内存中，不写入磁盘；训练目标会发送给提供商且可能产生费用，因此必须由用户明确确认。
 
 300M–38B 表示架构规模，不是已经预训练好的模型下载。要从零训练出真正可用的基础模型，需要大量经过认真处理的数据和可观的算力。
 
 ## 本地对话
 
-训练完成后，打开“对话”页面，加载 checkpoint 并发送消息。模型从本机存储加载，推理不需要互联网连接。
+训练完成后，打开“对话”页面，加载 checkpoint 并发送消息。模型从本机存储加载，推理不需要互联网连接。网页和桌面 App 关闭后，后台 API 仍可回答；如果模型因空闲被卸载，下一条消息会自动重新加载，因此第一次响应会更慢。
 
 Orbit 当前使用实验性的字节级 tokenizer 和模型架构。很小或很短的训练只能验证流程，无法直接产生通用能力很强的助手。
 
@@ -75,7 +98,7 @@ Orbit 当前使用实验性的字节级 tokenizer 和模型架构。很小或很
 {
   "provider": "openai-compatible",
   "base_url": "http://127.0.0.1:8765/v1",
-  "api_key": "orbit-local",
+  "api_key": "Orbit 页面显示的随机 Key",
   "model": "你的本地模型名称"
 }
 ```
@@ -87,7 +110,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://127.0.0.1:8765/v1",
-    api_key="orbit-local",
+    api_key="Orbit 页面显示的随机 Key",
 )
 
 response = client.chat.completions.create(
@@ -97,7 +120,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-当前兼容层支持模型列表和非流式聊天补全。Orbit 只绑定 localhost 时，API Key 的值仅用于兼容客户端，不进行校验。
+Orbit 会校验每一个 `/v1` 请求。首次启动会创建第一个随机 Key；API 页面可以继续生成多个 Key，并限定为全部模型或某一个 checkpoint。撤销其中一个 Key 不会影响其他智能体。
 
 ## 本地存储与隐私
 
@@ -105,6 +128,8 @@ print(response.choices[0].message.content)
 | --- | --- |
 | 模型与 checkpoint | `~/.orbit/models` |
 | 远程训练任务包 | `~/.orbit/jobs` |
+| AI 生成的数据集 | `~/.orbit/datasets` |
+| 随机 API Keys | `~/.orbit/api-keys.json` |
 | 隔离 Python 运行环境 | `~/.orbit/runtime` |
 
 Orbit 不会上传本地训练文本、checkpoint 或聊天消息。只有用户选择在另一台机器训练时，才会主动移动远程训练任务包。

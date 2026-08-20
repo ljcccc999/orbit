@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import socketserver
 import threading
 import time
 import urllib.error
@@ -30,6 +31,14 @@ class OrbitHTTPServer(ThreadingHTTPServer):
         super().__init__(address, Handler)
         self.runtime = runtime
         self.verbose = False
+
+    def server_bind(self) -> None:
+        # HTTPServer normally performs reverse DNS after binding. A local-only
+        # API must not depend on DNS availability, and this can otherwise delay
+        # startup for tens of seconds on an offline or proxied computer.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = str(self.server_address[0])
+        self.server_port = int(self.server_address[1])
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -71,6 +80,16 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("请求必须是 JSON 对象")
         return value
 
+    def _require_api_key(self, model: str | None = None) -> dict[str, str] | None:
+        supplied = self.headers.get("Authorization", "")
+        if supplied.lower().startswith("bearer "):
+            supplied = supplied[7:].strip()
+        record = self.server.runtime.authenticate_api_key(supplied, model)
+        if record is None:
+            self._json(401, {"error": "invalid_api_key"})
+            return None
+        return record
+
     def do_OPTIONS(self) -> None:
         self.send_response(204)
         self.send_header("Content-Length", "0")
@@ -101,21 +120,35 @@ class Handler(BaseHTTPRequestHandler):
                     "training": runtime.training_state(),
                     "models": runtime.list_models(),
                     "active_model": runtime.active_model_id,
+                    "loading": runtime.loading_state(),
+                    "resources": runtime.system_state(),
+                    "local_api_key": runtime.local_api_key,
+                    "api_keys": runtime.list_api_keys(),
                 })
             elif path == "/api/training":
                 self._json(200, self.server.runtime.training_state())
             elif path == "/api/models":
                 self._json(200, self.server.runtime.list_models())
+            elif path == "/api/models/loading":
+                self._json(200, self.server.runtime.loading_state())
+            elif path == "/api/keys":
+                self._json(200, self.server.runtime.list_api_keys())
             elif path == "/api/jobs":
                 self._json(200, self._job_rows())
             elif path.startswith("/api/jobs/") and path.endswith("/download"):
                 self._download_job(path.split("/")[3])
             elif path == "/v1/models":
+                key = self._require_api_key()
+                if not key:
+                    return
+                models = self.server.runtime.list_models()
+                if key["model"] != "*":
+                    models = [row for row in models if row["id"] == key["model"]]
                 self._json(200, {
                     "object": "list",
                     "data": [
                         {"id": row["id"], "object": "model", "created": 0, "owned_by": "local-user"}
-                        for row in self.server.runtime.list_models()
+                        for row in models
                     ],
                 })
             else:
@@ -131,10 +164,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._create_job(data)
             elif path == "/api/training/start":
                 self._json(202, self.server.runtime.start_training(data))
+            elif path == "/api/training/auto":
+                self._json(202, self.server.runtime.start_auto_training(data))
             elif path == "/api/training/stop":
                 self._json(202, self.server.runtime.stop_training())
             elif path == "/api/models/load":
-                self._json(200, self.server.runtime.load_model(str(data.get("model", ""))))
+                self._json(202, self.server.runtime.start_load_model(str(data.get("model", ""))))
+            elif path == "/api/models/unload":
+                self._json(200, self.server.runtime.unload_model())
+            elif path == "/api/keys/create":
+                self._json(201, self.server.runtime.create_api_key(str(data.get("name", "")), str(data.get("model", "*"))))
+            elif path == "/api/keys/revoke":
+                self._json(200, self.server.runtime.revoke_api_key(str(data.get("id", ""))))
             elif path == "/api/chat":
                 result = self.server.runtime.chat(
                     str(data.get("prompt", "")),
@@ -144,7 +185,13 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._json(200, result)
             elif path == "/v1/chat/completions":
+                if not self._require_api_key(str(data.get("model", "")) or None):
+                    return
                 self._openai_chat(data)
+            elif path == "/v1/responses":
+                if not self._require_api_key(str(data.get("model", "")) or None):
+                    return
+                self._openai_response(data)
             else:
                 self._error(404, "not found")
         except (ValueError, FileNotFoundError, MemoryError, RuntimeError) as exc:
@@ -247,6 +294,27 @@ class Handler(BaseHTTPRequestHandler):
                 "completion_tokens": len(content.encode("utf-8")),
                 "total_tokens": prompt_tokens + len(content.encode("utf-8")),
             },
+        })
+
+    def _openai_response(self, data: dict[str, Any]) -> None:
+        raw_input = data.get("input", "")
+        if isinstance(raw_input, str):
+            prompt = raw_input
+        elif isinstance(raw_input, list):
+            prompt = "\n".join(str(item.get("content", "")) if isinstance(item, dict) else str(item) for item in raw_input)
+        else:
+            raise ValueError("input 必须是字符串或数组")
+        result = self.server.runtime.chat(
+            prompt, str(data["model"]) if data.get("model") else None,
+            int(data.get("max_output_tokens", 128)), float(data.get("temperature", 0.8)),
+        )
+        now = int(time.time())
+        content = result["content"]
+        self._json(200, {
+            "id": f"resp_orbit_{now}", "object": "response", "created_at": now,
+            "status": "completed", "model": result["model"],
+            "output": [{"id": f"msg_orbit_{now}", "type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": content, "annotations": []}]}],
+            "output_text": content,
         })
 
 

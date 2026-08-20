@@ -8,36 +8,58 @@
 
 # Orbit
 
-Orbit is a local AI studio that puts model training, checkpoint management, chat, and an OpenAI-compatible API in one browser interface. Training data, models, and conversations stay on the user's computer by default.
+Orbit is a local AI studio that puts model training, checkpoint management, chat, and an OpenAI-compatible API in one interface. Training data, models, and conversations stay on the user's computer by default.
 
 ## What Orbit does
 
 - Opens a graphical training and chat interface in the browser.
 - Supports architecture presets from approximately 300M to 38B parameters.
 - Checks local memory before allocating a model.
+- Runs a crash-recovering background API on macOS, Linux, and Windows.
+- Loads weights on demand and automatically unloads an idle model after five minutes.
+- Can use DeepSeek or another OpenAI-compatible API to generate a supervised dataset and then start local training.
 - Saves locally trained checkpoints under `~/.orbit/models`.
 - Creates self-contained training bundles for CUDA GPU servers.
-- Serves local checkpoints through `GET /v1/models` and `POST /v1/chat/completions`.
+- Serves local checkpoints through `GET /v1/models`, `POST /v1/chat/completions`, and `POST /v1/responses`.
+- Creates multiple random, revocable API keys that can be restricted to one local model.
 - Lets local agents connect through an OpenAI-compatible configuration.
 
 ## Requirements
 
 - More than 10 GB of system memory. More memory is required for larger presets.
-- Python 3.9 or newer.
-- macOS or Linux. CUDA is recommended for serious training.
+- macOS, Linux, or Windows. CUDA is recommended for serious training.
+- No preinstalled Python is required by the installers. Orbit uses a suitable existing Python or prepares a private Python 3.11 runtime.
 - Internet access is needed once to download the installer and dependencies. Training, inference, and the local API can run offline afterward.
 
 ## One-line install and launch
+
+### Desktop apps
+
+Download the current [macOS universal app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-macOS-universal.zip), [Windows x64 app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-x64.exe), or [Windows ARM64 app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-arm64.exe). Open the app and it prepares the local runtime without opening a terminal.
+
+The current public builds are not Developer ID/Authenticode signed or notarized. macOS Gatekeeper or Windows SmartScreen may therefore require an explicit first-open confirmation. Removing that system warning requires platform signing certificates; it is not something application code can safely bypass.
+
+### macOS and Linux command line
 
 ```bash
 curl --retry 5 --retry-delay 2 --connect-timeout 20 -fsSL https://raw.githubusercontent.com/ljcccc999/orbit/main/install.sh | sh
 ```
 
-The installer checks memory, creates an isolated runtime under `~/.orbit/runtime`, installs Orbit, starts the local service, and opens the browser. Run `orbit` later to open it again.
+The installer checks memory, creates an isolated runtime under `~/.orbit/runtime`, installs Orbit, starts the local service, and opens the browser. Run `orbit` later to open it again. The web page is only a management client: closing it does not stop the OpenAI-compatible API.
 
 The command is safe to run again after an interrupted download. It resumes the existing isolated runtime and retries network downloads automatically.
 
 Orbit listens on `127.0.0.1:8765` by default. It is not exposed to the local network or the internet.
+
+```bash
+orbit start
+orbit status
+orbit chat "Hello"
+orbit unload
+orbit stop
+```
+
+The macOS LaunchAgent and Linux user-level systemd service restart Orbit after a crash. `orbit unload` releases the active weights immediately; otherwise the default idle timer does this automatically.
 
 ## Model sizes
 
@@ -58,12 +80,13 @@ Open the **Training** page, choose a preset, paste the user's own text, and sele
 
 1. **Train on this computer** starts a local job only after the memory gate passes. The checkpoint stays in `~/.orbit/models`.
 2. **Create remote GPU bundle** downloads a ZIP containing the dataset, configuration, Orbit source, and a `run.sh` entry point for a CUDA machine.
+3. **Generate data and automatically train** calls DeepSeek or another OpenAI-compatible teacher API, stores the generated dataset locally, and then enters the same guarded local training path. The API key is kept only in request memory. The training goal leaves the computer and the provider may charge for usage, so this path requires explicit confirmation.
 
 The 300M–38B choices describe architecture sizes; they are not pretrained model downloads. Training a useful foundation model from scratch requires a large, carefully prepared dataset and substantial compute.
 
 ## Chat locally
 
-After training finishes, open **Chat**, load a checkpoint, and send a message. The model is loaded from local storage and inference does not require an internet connection.
+After training finishes, open **Chat**, load a checkpoint, and send a message. The model is loaded from local storage and inference does not require an internet connection. The background API can answer while the web page and desktop app are closed. If weights were unloaded during idle time, the first new request loads them again and may take longer.
 
 Orbit currently uses a byte-level experimental tokenizer and architecture. A very small or short training run validates the workflow but will not produce a generally capable assistant.
 
@@ -75,7 +98,7 @@ Open the **API** page to copy the endpoint and examples. The default configurati
 {
   "provider": "openai-compatible",
   "base_url": "http://127.0.0.1:8765/v1",
-  "api_key": "orbit-local",
+  "api_key": "the-random-key-shown-by-orbit",
   "model": "your-local-model-id"
 }
 ```
@@ -87,7 +110,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://127.0.0.1:8765/v1",
-    api_key="orbit-local",
+    api_key="the-random-key-shown-by-orbit",
 )
 
 response = client.chat.completions.create(
@@ -97,7 +120,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-The current compatibility layer supports model listing and non-streaming chat completions. The API key value is accepted for client compatibility but is not checked while Orbit is bound to localhost.
+Orbit authenticates every `/v1` request. The first random key is created on first launch; additional keys can be created in the API page and scoped to all models or one checkpoint. Revoking one key does not interrupt other agents.
 
 ## Local storage and privacy
 
@@ -105,6 +128,8 @@ The current compatibility layer supports model listing and non-streaming chat co
 | --- | --- |
 | Models and checkpoints | `~/.orbit/models` |
 | Remote training bundles | `~/.orbit/jobs` |
+| AI-generated datasets | `~/.orbit/datasets` |
+| Random API keys | `~/.orbit/api-keys.json` |
 | Isolated Python runtime | `~/.orbit/runtime` |
 
 Orbit does not upload local training text, checkpoints, or chat messages. Users explicitly move a remote training bundle if they choose to train on another machine.

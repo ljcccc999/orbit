@@ -7,10 +7,14 @@ RUNTIME_DIR="$INSTALL_ROOT/runtime"
 BIN_DIR="${ORBIT_BIN_DIR:-}"
 ARCHIVE_URL="${ORBIT_ARCHIVE_URL:-https://github.com/ljcccc999/orbit/archive/refs/heads/main.tar.gz}"
 TEMP_DIR=""
+NEW_RUNTIME=""
 
 cleanup() {
   if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
     rm -rf "$TEMP_DIR"
+  fi
+  if [ -n "$NEW_RUNTIME" ] && [ -d "$NEW_RUNTIME" ]; then
+    rm -rf "$NEW_RUNTIME"
   fi
 }
 trap cleanup EXIT INT TERM
@@ -68,15 +72,13 @@ if [ "$MEMORY_GB" -gt 0 ] && [ "$MEMORY_GB" -le "$MINIMUM_MEMORY_GB" ]; then
   exit 1
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-  printf 'Python 3.9 or newer is required. Install Python and run this command again.\n' >&2
-  exit 1
-fi
-
-if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)'; then
-  printf 'Python 3.9 or newer is required.\n' >&2
-  exit 1
-fi
+PYTHON_BIN=""
+for candidate in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+  if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+    PYTHON_BIN=$(command -v "$candidate")
+    break
+  fi
+done
 
 if [ -z "$BIN_DIR" ]; then
   BIN_DIR=$(choose_bin_dir)
@@ -104,19 +106,56 @@ else
 fi
 
 mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
-if [ ! -x "$RUNTIME_DIR/bin/python" ]; then
-  printf 'Creating the local Orbit runtime…\n'
-  python3 -m venv "$RUNTIME_DIR"
+RUNTIME_OK=false
+if [ -x "$RUNTIME_DIR/bin/python" ] && "$RUNTIME_DIR/bin/python" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+  RUNTIME_OK=true
 fi
 
-printf 'Installing Orbit and its local AI runtime…\n'
-"$RUNTIME_DIR/bin/python" -m pip install --retries 8 --timeout 60 --upgrade pip
-"$RUNTIME_DIR/bin/python" -m pip install --retries 8 --timeout 60 --upgrade "$SOURCE_DIR"
+if [ "$RUNTIME_OK" = false ]; then
+  printf 'Creating the local Orbit runtime…\n'
+  NEW_RUNTIME="$INSTALL_ROOT/runtime.new.$$"
+  if [ -n "$PYTHON_BIN" ]; then
+    "$PYTHON_BIN" -m venv "$NEW_RUNTIME"
+  else
+    if ! command -v curl >/dev/null 2>&1; then
+      printf 'Orbit needs curl once to install its private Python 3.11 runtime.\n' >&2
+      exit 1
+    fi
+    if [ -z "$TEMP_DIR" ]; then
+      TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/orbit-install.XXXXXX")
+    fi
+    printf 'Installing a private Python 3.11 runtime for Orbit…\n'
+    download "https://astral.sh/uv/install.sh" "$TEMP_DIR/uv-install.sh"
+    UV_DIR="$INSTALL_ROOT/tools"
+    env UV_UNMANAGED_INSTALL="$UV_DIR" sh "$TEMP_DIR/uv-install.sh"
+    "$UV_DIR/uv" venv --python 3.11 "$NEW_RUNTIME"
+  fi
+  printf 'Installing Orbit and its local AI runtime…\n'
+  "$NEW_RUNTIME/bin/python" -m pip install --retries 8 --timeout 60 --upgrade pip
+  "$NEW_RUNTIME/bin/python" -m pip install --retries 8 --timeout 60 --upgrade "$SOURCE_DIR"
+  if [ -d "$RUNTIME_DIR" ]; then
+    OLD_RUNTIME="$INSTALL_ROOT/runtime.old.$$"
+    mv "$RUNTIME_DIR" "$OLD_RUNTIME"
+    ln -s "$NEW_RUNTIME" "$RUNTIME_DIR"
+    NEW_RUNTIME=""
+    rm -rf "$OLD_RUNTIME"
+  else
+    ln -s "$NEW_RUNTIME" "$RUNTIME_DIR"
+    NEW_RUNTIME=""
+  fi
+else
+  printf 'Installing Orbit and its local AI runtime…\n'
+  "$RUNTIME_DIR/bin/python" -m pip install --retries 8 --timeout 60 --upgrade pip
+  "$RUNTIME_DIR/bin/python" -m pip install --retries 8 --timeout 60 --upgrade "$SOURCE_DIR"
+fi
 ln -sf "$RUNTIME_DIR/bin/orbit" "$BIN_DIR/orbit"
 
 printf '\nOrbit is installed. Models and training data stay in %s.\n' "$INSTALL_ROOT"
 if ! printf '%s' ":$PATH:" | grep -q ":$BIN_DIR:"; then
   printf 'For later launches, add %s to PATH or run %s/orbit.\n' "$BIN_DIR" "$BIN_DIR"
 fi
-printf 'Opening the local web interface…\n'
-exec "$RUNTIME_DIR/bin/orbit"
+printf 'Starting the crash-recovering local API and opening the interface…\n'
+if [ "${ORBIT_NO_BROWSER:-0}" = "1" ]; then
+  exec "$RUNTIME_DIR/bin/orbit" start
+fi
+exec "$RUNTIME_DIR/bin/orbit" open

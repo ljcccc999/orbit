@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
+import shutil
 import threading
 from contextlib import nullcontext
 from pathlib import Path
@@ -41,15 +43,20 @@ def _autocast(device: torch.device, precision: str):
 
 def _save(path: Path, model, optimizer, scheduler, cfg, preset, train_cfg, step):
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({
-        "config": cfg.__dict__,
-        "model": model.state_dict(),
-        "optimizer": optimizer.state_dict(),
-        "scheduler": scheduler.state_dict(),
-        "preset": preset,
-        "training_config": train_cfg.__dict__,
-        "step": step,
-    }, path)
+    free = shutil.disk_usage(path.parent).free
+    estimated = max(512 * 1024 * 1024, cfg.estimate_parameters() * 16)
+    if free < estimated + 1024 * 1024 * 1024:
+        raise OSError("磁盘可用空间接近安全下限，Orbit 未覆盖现有 checkpoint")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    try:
+        torch.save({
+            "config": cfg.__dict__, "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
+            "preset": preset, "training_config": train_cfg.__dict__, "step": step,
+        }, temporary)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def run_training(

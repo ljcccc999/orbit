@@ -36,7 +36,8 @@ def test_http_health_models_and_openai_chat(tmp_path):
     try:
         with urllib.request.urlopen(base + "/api/health") as response:
             assert json.loads(response.read())["name"] == "orbit"
-        with urllib.request.urlopen(base + "/v1/models") as response:
+        headers = {"Authorization": f"Bearer {runtime.local_api_key}"}
+        with urllib.request.urlopen(urllib.request.Request(base + "/v1/models", headers=headers)) as response:
             assert json.loads(response.read())["data"][0]["id"] == "orbit-test"
         request = urllib.request.Request(
             base + "/v1/chat/completions",
@@ -46,7 +47,7 @@ def test_http_health_models_and_openai_chat(tmp_path):
                 "max_tokens": 1,
                 "temperature": 0,
             }).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **headers},
             method="POST",
         )
         with urllib.request.urlopen(request) as response:
@@ -73,10 +74,23 @@ def test_local_training_creates_a_local_checkpoint(tmp_path):
         "device": "cpu",
         "text": "Orbit local training data. " * 10,
     })
-    assert state["status"] == "running"
+    assert state["status"] in {"preparing", "running"}
     deadline = time.time() + 20
-    while runtime.training_state()["status"] == "running" and time.time() < deadline:
+    while runtime.training_state()["status"] in {"preparing", "running", "stopping"} and time.time() < deadline:
         time.sleep(0.05)
     finished = runtime.training_state()
     assert finished["status"] == "completed"
     assert runtime.list_models()[0]["id"] == finished["model_id"]
+    assert runtime._training_process is None
+
+
+def test_multiple_model_scoped_api_keys(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    _write_tiny_checkpoint(runtime, "one")
+    _write_tiny_checkpoint(runtime, "two")
+    key = runtime.create_api_key("Agent one", "one")
+    assert runtime.authenticate_api_key(key["key"], "one") is not None
+    assert runtime.authenticate_api_key(key["key"], "two") is None
+    assert len(runtime.list_api_keys()) == 2
+    runtime.revoke_api_key(key["id"])
+    assert runtime.authenticate_api_key(key["key"], "one") is None
