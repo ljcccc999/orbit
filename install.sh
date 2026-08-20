@@ -4,7 +4,7 @@ set -eu
 MINIMUM_MEMORY_GB=10
 INSTALL_ROOT="${ORBIT_INSTALL_ROOT:-$HOME/.orbit}"
 RUNTIME_DIR="$INSTALL_ROOT/runtime"
-BIN_DIR="${ORBIT_BIN_DIR:-$HOME/.local/bin}"
+BIN_DIR="${ORBIT_BIN_DIR:-}"
 ARCHIVE_URL="${ORBIT_ARCHIVE_URL:-https://github.com/ljcccc999/orbit/archive/refs/heads/main.tar.gz}"
 TEMP_DIR=""
 
@@ -14,6 +14,20 @@ cleanup() {
   fi
 }
 trap cleanup EXIT INT TERM
+
+choose_bin_dir() {
+  for candidate in /usr/local/bin /opt/homebrew/bin "$HOME/.local/bin"; do
+    case ":$PATH:" in
+      *":$candidate:"*)
+        if [ -d "$candidate" ] && [ -w "$candidate" ]; then
+          printf '%s' "$candidate"
+          return
+        fi
+        ;;
+    esac
+  done
+  printf '%s' "$HOME/.local/bin"
+}
 
 download() {
   url="$1"
@@ -62,6 +76,10 @@ fi
 if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)'; then
   printf 'Python 3.9 or newer is required.\n' >&2
   exit 1
+fi
+
+if [ -z "$BIN_DIR" ]; then
+  BIN_DIR=$(choose_bin_dir)
 fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || true)
