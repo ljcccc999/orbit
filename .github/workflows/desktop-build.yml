@@ -54,6 +54,8 @@ jobs:
         working-directory: desktop/linux
       - run: npm run dist -- --${{ matrix.arch }}
         working-directory: desktop/linux
+      - if: matrix.arch == 'x64'
+        run: mv desktop/linux/dist/Orbit-Linux-x86_64.AppImage desktop/linux/dist/Orbit-Linux-x64.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: Orbit-Linux-${{ matrix.arch }}
