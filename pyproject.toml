@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orbit-ai"
+version = "0.2.0"
+description = "Orbit: local model training, chat, and an OpenAI-compatible API in one browser interface."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dependencies = ["torch>=2.2", "numpy>=1.24"]
+
+[project.scripts]
+orbit = "orbit.web:main"
+orbit-train = "orbit.train:main"
+orbit-gui = "orbit.gui:main"
+
+[tool.setuptools.packages.find]
+include = ["orbit*"]
+
+[tool.setuptools.package-data]
+orbit = ["static/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
