@@ -222,10 +222,10 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
             let orbit = orbitExecutable()
             do {
                 if FileManager.default.isExecutableFile(atPath: orbit) {
-                    setStatus("正在启动本机 API…")
+                    await setStatus("正在启动本机 API…")
                     try await run(orbit, ["start"])
                 } else {
-                    setStatus("首次启动：正在安装本机 AI 运行时…")
+                    await setStatus("首次启动：正在安装本机 AI 运行时…")
                     guard let installer = Bundle.main.path(forResource: "install", ofType: "sh") else { throw NSError(domain: "Orbit", code: 1, userInfo: [NSLocalizedDescriptionKey: "安装器缺失"]) }
                     try await run("/usr/bin/env", ["ORBIT_NO_BROWSER=1", "/bin/sh", installer]) { line in Task { @MainActor in self.statusLabel.stringValue = line } }
                 }
@@ -234,11 +234,11 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
                     try await Task.sleep(for: .milliseconds(250))
                 }
             } catch {
-                setStatus("无法启动 Orbit：\(error.localizedDescription)")
+                await setStatus("无法启动 Orbit：\(error.localizedDescription)")
                 return
             }
         }
-        guard await isHealthy() else { setStatus("本机 API 未能启动，请重新打开 Orbit"); return }
+        guard await isHealthy() else { await setStatus("本机 API 未能启动，请重新打开 Orbit"); return }
         await MainActor.run {
             webView.load(URLRequest(url: orbitURL))
             webView.isHidden = false
