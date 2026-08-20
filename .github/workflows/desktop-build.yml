@@ -12,24 +12,31 @@ jobs:
       - uses: actions/checkout@v4
       - run: chmod +x desktop/macos/build.sh && desktop/macos/build.sh dist
       - uses: actions/upload-artifact@v4
-        with: {name: Orbit-macOS-universal, path: dist/Orbit-macOS-universal.zip}
+        with:
+          name: Orbit-macOS-universal
+          path: dist/Orbit-macOS-universal.zip
       - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
-        with: {files: dist/Orbit-macOS-universal.zip}
+        with:
+          files: dist/Orbit-macOS-universal.zip
   windows:
     runs-on: windows-2025
     strategy: {matrix: {runtime: [win-x64, win-arm64]}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
-        with: {dotnet-version: "8.0.x"}
+        with:
+          dotnet-version: "8.0.x"
       - run: dotnet publish desktop/windows/OrbitDesktop.csproj -c Release -r ${{ matrix.runtime }} -o dist/${{ matrix.runtime }}
       - shell: pwsh
         run: |
           $suffix = if ("${{ matrix.runtime }}" -eq "win-x64") { "x64" } else { "arm64" }
           Move-Item "dist/${{ matrix.runtime }}/Orbit.exe" "dist/Orbit-Windows-$suffix.exe"
       - uses: actions/upload-artifact@v4
-        with: {name: Orbit-Windows-${{ matrix.runtime }}, path: dist/Orbit-Windows-*.exe}
+        with:
+          name: Orbit-Windows-${{ matrix.runtime }}
+          path: dist/Orbit-Windows-*.exe
       - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
-        with: {files: dist/Orbit-Windows-*.exe}
+        with:
+          files: dist/Orbit-Windows-*.exe
