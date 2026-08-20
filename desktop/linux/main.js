@@ -135,7 +135,7 @@ async function quitOrbit() {
 }
 
 function createTray() {
-  let icon = nativeImage.createFromPath(path.join(process.resourcesPath, "orbit-logo.png"));
+  let icon = nativeImage.createFromPath(path.join(process.resourcesPath, "orbit-logo-transparent.png"));
   icon = icon.resize({ width: 20, height: 20 });
   tray = new Tray(icon);
   tray.setToolTip("Orbit · Local AI");

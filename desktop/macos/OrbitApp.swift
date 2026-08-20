@@ -65,9 +65,10 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            if let path = Bundle.main.path(forResource: "orbit-logo", ofType: "png"),
+            if let path = Bundle.main.path(forResource: "orbit-logo-transparent", ofType: "png"),
                let image = NSImage(contentsOfFile: path) {
                 image.size = NSSize(width: 18, height: 18)
+                image.isTemplate = true
                 button.image = image
             } else {
                 button.image = NSImage(systemSymbolName: "circle.dotted", accessibilityDescription: "Orbit")
@@ -93,10 +94,11 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
     }
 
     private func buildWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.delegate = self
         window.title = "Orbit"
         window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
         window.center()
         window.minSize = NSSize(width: 820, height: 600)
 

@@ -44,6 +44,8 @@ def main() -> None:
             text=Path(job["dataset"]).read_text(encoding="utf-8"), preset=str(job["preset"]),
             callback=progress, stop_event=stop_event,
             training_config=TrainingConfig(**job["training_config"]),
+            resume=Path(job["resume"]) if job.get("resume") else None,
+            resume_weights_only=bool(job.get("resume")), model_metadata=job.get("metadata") or {},
         )
         send({"type": "stopped" if stop_event.is_set() else "completed"})
     except Exception as exc:

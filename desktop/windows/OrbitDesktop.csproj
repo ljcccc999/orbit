@@ -3,7 +3,7 @@
     <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable><AssemblyName>Orbit</AssemblyName>
-    <RootNamespace>OrbitDesktop</RootNamespace><Version>0.3.2</Version>
+    <RootNamespace>OrbitDesktop</RootNamespace><Version>0.4.0</Version>
     <PublishSingleFile>true</PublishSingleFile><SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
@@ -11,5 +11,6 @@
   <ItemGroup>
     <EmbeddedResource Include="../../install.ps1" LogicalName="OrbitDesktop.install.ps1" />
     <EmbeddedResource Include="../../orbit/static/orbit-logo.png" LogicalName="OrbitDesktop.orbit-logo.png" />
+    <EmbeddedResource Include="../../orbit/static/orbit-logo-transparent.png" LogicalName="OrbitDesktop.orbit-logo-transparent.png" />
   </ItemGroup>
 </Project>

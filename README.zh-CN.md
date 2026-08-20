@@ -12,15 +12,19 @@ Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对�
 
 ## Orbit 可以做什么
 
-- 在浏览器中打开图形化训练和对话界面。
+- 提供可拖动的桌面工作台，并把对话、模型、训练、训练历史和 API 分成独立区域。
+- 默认跟随操作系统语言，也可手动切换 English / 中文。
 - 提供约 300M 到 38B 参数的架构预设。
 - 分配模型前检查本机内存。
 - 在 macOS、Linux 和 Windows 上运行可崩溃恢复的后台 API。
 - 关闭窗口后仍在 macOS 菜单栏或 Windows/Linux 系统托盘常驻；只有选择“退出 Orbit”才停止本地服务。
 - 按需加载模型；空闲五分钟后自动卸载权重并释放加速器缓存。
-- 可使用 DeepSeek 或其他 OpenAI 兼容 API 生成监督数据，然后自动进入本机训练。
+- 可使用 DeepSeek 或其他 OpenAI 兼容 API，根据所选模型参数生成监督数据并自动进入本机训练；教师 API 配置只保存在本机受限权限文件中。
 - 将本机训练的 checkpoint 保存在 `~/.orbit/models`。
+- 支持自定义模型名、从已有 checkpoint 二次训练、父模型血缘，以及查看每次训练的原文、参数和结果。
+- Orbit 身份独立于用户自定义模型名；即使还没训练模型也知道自己是 Orbit，服务器导出包也会保留这个身份。
 - 为 CUDA GPU 服务器生成自包含训练任务包。
+- 可把训练模型导出为带 OpenAI 兼容 API 的便携 Orbit 服务器；存在兼容的同名 GGUF 时也可生成 Ollama 包。
 - 通过 `GET /v1/models`、`POST /v1/chat/completions` 和 `POST /v1/responses` 提供本地模型 API。
 - 可生成多个随机、可撤销的 API Key，并把每个 Key 限定到某一个本地模型。
 - 让本机智能体通过 OpenAI 兼容配置接入。
@@ -79,11 +83,13 @@ macOS LaunchAgent 和 Linux 用户级 systemd 服务会在 Orbit 异常退出后
 
 ## 训练
 
-打开“训练”页面，选择预设，粘贴用户自己的文本，然后选择两种路径之一：
+打开“训练”页面，选择预设，可选填写模型名或选择父 checkpoint，粘贴用户自己的文本，然后选择三种路径之一：
 
 1. **在本机开始训练**：只有通过内存检查后才会启动本地任务，checkpoint 保存在 `~/.orbit/models`。
 2. **生成远程 GPU 任务包**：下载一个 ZIP，其中包含数据集、配置、Orbit 源码和供 CUDA 机器执行的 `run.sh` 入口。
-3. **生成样本并自动训练**：调用 DeepSeek 或其他 OpenAI 兼容教师 API，生成的数据集保存在本机，然后进入同一套受保护的本机训练流程。API Key 只停留在本次请求内存中，不写入磁盘；训练目标会发送给提供商且可能产生费用，因此必须由用户明确确认。
+3. **生成样本并自动训练**：调用 DeepSeek 或其他 OpenAI 兼容教师 API。Orbit 会把所选模型的参数量、上下文长度、步数、父模型和用户目标告诉教师模型，让样本适应该模型规模。生成的数据集保存在本机。提供商设置和 Key 保存在 `~/.orbit/teacher-api.json`，权限仅限当前用户；Key 不会进入训练历史或导出包。训练目标会发送给提供商且可能产生费用，因此必须由用户明确确认。
+
+每次实际训练都会在 `~/.orbit/training-runs` 保存可查看的记录，包括原始训练内容、参数、状态、loss、结果、模型名和父模型。点击“二次训练”会创建新 checkpoint 和新优化器，不覆盖父模型。
 
 300M–38B 表示架构规模，不是已经预训练好的模型下载。要从零训练出真正可用的基础模型，需要大量经过认真处理的数据和可观的算力。
 
@@ -92,6 +98,13 @@ macOS LaunchAgent 和 Linux 用户级 systemd 服务会在 Orbit 异常退出后
 训练完成后，打开“对话”页面，加载 checkpoint 并发送消息。模型从本机存储加载，推理不需要互联网连接。网页和桌面 App 关闭后，后台 API 仍可回答；如果模型因空闲被卸载，下一条消息会自动重新加载，因此第一次响应会更慢。
 
 Orbit 当前使用实验性的字节级 tokenizer 和模型架构。很小或很短的训练只能验证流程，无法直接产生通用能力很强的助手。
+
+## 导出与部署
+
+模型页面提供两条明确的导出路径：
+
+- **服务器导出**：生成包含 checkpoint、Orbit 身份元数据、源码、macOS/Linux 与 Windows 启动脚本和 OpenAI 兼容服务的 ZIP，可移动到用户自己的服务器。
+- **Ollama 导出**：只有存在兼容的 `~/.orbit/models/<模型名>.gguf` 时才生成基于 GGUF 的 `Modelfile` 包。Orbit 实验性的原生 `.pt` 混合架构不会被伪装成 GGUF；这种格式应使用服务器导出。
 
 ## 接入本机智能体
 
@@ -134,7 +147,10 @@ API 按 OpenAI 的模型列表、非流式 Chat Completions 和非流式 Respons
 | 模型与 checkpoint | `~/.orbit/models` |
 | 远程训练任务包 | `~/.orbit/jobs` |
 | AI 生成的数据集 | `~/.orbit/datasets` |
+| 训练历史与每次训练原文 | `~/.orbit/training-runs` |
+| 便携模型导出包 | `~/.orbit/exports` |
 | 随机 API Keys | `~/.orbit/api-keys.json` |
+| 保存的教师 API 设置 | `~/.orbit/teacher-api.json` |
 | 隔离 Python 运行环境 | `~/.orbit/runtime` |
 
 Orbit 不会上传本地训练文本、checkpoint 或聊天消息。只有用户选择在另一台机器训练时，才会主动移动远程训练任务包。

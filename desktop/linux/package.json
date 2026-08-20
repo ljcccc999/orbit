@@ -1,6 +1,6 @@
 {
   "name": "orbit-linux-desktop",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "description": "Orbit local AI desktop app for Linux",
   "main": "main.js",
@@ -27,6 +27,10 @@
       {
         "from": "../../orbit/static/orbit-logo.png",
         "to": "orbit-logo.png"
+      },
+      {
+        "from": "../../orbit/static/orbit-logo-transparent.png",
+        "to": "orbit-logo-transparent.png"
       }
     ],
     "linux": {

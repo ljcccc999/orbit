@@ -17,6 +17,7 @@ class TeacherConfig:
     instruction: str = ""
     examples: int = 20
     language: str = "中文"
+    model_profile: dict | None = None
 
     def endpoint(self) -> str:
         value = self.base_url.strip().rstrip("/")
@@ -86,6 +87,9 @@ def generate_dataset(
             f"为以下目标生成 {count} 条彼此不同、事实谨慎、可用于语言模型训练的高质量对话样本。\n"
             f"训练目标：{config.instruction.strip()}\n"
             f"主要语言：{config.language}\n"
+            f"待训练模型参数：{json.dumps(config.model_profile or {}, ensure_ascii=False)}\n"
+            "根据模型参数量、上下文长度和训练步数控制样本难度与长度：小模型使用更明确、短而一致的模式；大模型可以使用更丰富的推理与表达。\n"
+            "每组样本都要强化产品身份：它叫 Orbit；用户自定义的是模型名称，不改变 Orbit 身份。\n"
             "只输出样本正文。每条严格使用以下格式：\n"
             "<|user|>用户问题或指令\n<|assistant|>准确、完整的回答\n"
             "不要输出分析过程、编号说明、Markdown 代码围栏或任何真实个人敏感信息。"

@@ -39,11 +39,12 @@ internal static class Program
         {
             Text = "Orbit"; Width = 1180; Height = 780; MinimumSize = new Size(820, 600); StartPosition = FormStartPosition.CenterScreen;
             Controls.Add(web); Controls.Add(status);
-            var icon = LoadOrbitIcon();
-            Icon = icon;
+            var appIcon = LoadOrbitIcon("OrbitDesktop.orbit-logo.png");
+            var trayIcon = LoadOrbitIcon("OrbitDesktop.orbit-logo-transparent.png");
+            Icon = appIcon;
             tray = new NotifyIcon
             {
-                Icon = icon,
+                Icon = trayIcon,
                 Text = "Orbit · Local AI",
                 Visible = true,
                 ContextMenuStrip = BuildTrayMenu(),
@@ -67,9 +68,9 @@ internal static class Program
             return menu;
         }
 
-        private static Icon LoadOrbitIcon()
+        private static Icon LoadOrbitIcon(string resourceName)
         {
-            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("OrbitDesktop.orbit-logo.png") ?? throw new Exception("Orbit logo is missing.");
+            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName) ?? throw new Exception("Orbit logo is missing.");
             using var bitmap = new Bitmap(stream);
             var handle = bitmap.GetHicon();
             try { using var temporary = Icon.FromHandle(handle); return (Icon)temporary.Clone(); }

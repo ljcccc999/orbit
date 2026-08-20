@@ -108,6 +108,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/static/orbit-logo.png":
                 logo = resources.files("orbit").joinpath("static/orbit-logo.png").read_bytes()
                 self._send(200, logo, "image/png")
+            elif path == "/static/orbit-logo-transparent.png":
+                logo = resources.files("orbit").joinpath("static/orbit-logo-transparent.png").read_bytes()
+                self._send(200, logo, "image/png")
             elif path == "/api/health":
                 self._json(200, {"name": "orbit", "status": "ok", "local": True})
             elif path == "/api/system":
@@ -124,9 +127,14 @@ class Handler(BaseHTTPRequestHandler):
                     "resources": runtime.system_state(),
                     "local_api_key": runtime.local_api_key,
                     "api_keys": runtime.list_api_keys(),
+                    "teacher_settings": runtime.teacher_settings(),
                 })
             elif path == "/api/training":
                 self._json(200, self.server.runtime.training_state())
+            elif path == "/api/training/runs":
+                self._json(200, self.server.runtime.list_training_runs())
+            elif path.startswith("/api/training/runs/"):
+                self._json(200, self.server.runtime.training_run(path.split("/")[4]))
             elif path == "/api/models":
                 self._json(200, self.server.runtime.list_models())
             elif path == "/api/models/loading":
@@ -137,6 +145,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self._job_rows())
             elif path.startswith("/api/jobs/") and path.endswith("/download"):
                 self._download_job(path.split("/")[3])
+            elif path.startswith("/api/exports/"):
+                self._download_export(path.split("/")[3])
             elif path == "/v1/models":
                 key = self._require_api_key()
                 if not key:
@@ -149,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                     "data": [
                         {"id": row["id"], "object": "model", "created": 0, "owned_by": "local-user"}
                         for row in models
-                    ],
+                    ] or ([{"id": "orbit", "object": "model", "created": 0, "owned_by": "local-user"}] if key["model"] == "*" else []),
                 })
             else:
                 self._error(404, "not found")
@@ -172,6 +182,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(202, self.server.runtime.start_load_model(str(data.get("model", ""))))
             elif path == "/api/models/unload":
                 self._json(200, self.server.runtime.unload_model())
+            elif path == "/api/models/export":
+                result = self.server.runtime.export_model(str(data.get("model", "")), str(data.get("target", "server")))
+                result["download"] = f"/api/exports/{result['filename']}"
+                self._json(201, result)
             elif path == "/api/keys/create":
                 self._json(201, self.server.runtime.create_api_key(str(data.get("name", "")), str(data.get("model", "*"))))
             elif path == "/api/keys/revoke":
@@ -234,6 +248,7 @@ class Handler(BaseHTTPRequestHandler):
             train_cfg.learning_rate,
             text,
             training_config=train_cfg,
+            model_name=str(data.get("model_name", "orbit")),
         )
         job_id = zip_path.stem.removeprefix("orbit-training-")
         self._json(201, {
@@ -254,6 +269,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", f'attachment; filename="{matches[0].name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _download_export(self, filename: str) -> None:
+        if Path(filename).name != filename or not filename.endswith(".zip"):
+            self._error(400, "invalid export filename")
+            return
+        archive = self.server.runtime.exports_root / filename
+        if not archive.is_file():
+            self._error(404, "export not found")
+            return
+        data = archive.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{archive.name}"')
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

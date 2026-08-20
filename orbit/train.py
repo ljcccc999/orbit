@@ -41,7 +41,7 @@ def _autocast(device: torch.device, precision: str):
     return torch.autocast(device_type="cuda", dtype=dtype)
 
 
-def _save(path: Path, model, optimizer, scheduler, cfg, preset, train_cfg, step):
+def _save(path: Path, model, optimizer, scheduler, cfg, preset, train_cfg, step, metadata=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(path.parent).free
     estimated = max(512 * 1024 * 1024, cfg.estimate_parameters() * 16)
@@ -53,6 +53,7 @@ def _save(path: Path, model, optimizer, scheduler, cfg, preset, train_cfg, step)
             "config": cfg.__dict__, "model": model.state_dict(),
             "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
             "preset": preset, "training_config": train_cfg.__dict__, "step": step,
+            "metadata": metadata or {},
         }, temporary)
         os.replace(temporary, path)
     finally:
@@ -69,6 +70,7 @@ def run_training(
     precision: str = "auto", scheduler_name: str = "cosine",
     checkpoint_every: int = 500, seed: int = 42, resume: Optional[Path] = None,
     training_config: Optional[TrainingConfig] = None,
+    resume_weights_only: bool = False, model_metadata: Optional[dict] = None,
 ) -> Path:
     train_cfg = training_config or TrainingConfig(
         steps=steps, batch_size=batch_size, seq_len=seq_len, grad_accum=grad_accum,
@@ -102,11 +104,11 @@ def run_training(
     if resume:
         state = torch.load(resume, map_location="cpu")
         model.load_state_dict(state["model"])
-        if "optimizer" in state:
+        if not resume_weights_only and "optimizer" in state:
             optimizer.load_state_dict(state["optimizer"])
-        if "scheduler" in state:
+        if not resume_weights_only and "scheduler" in state:
             scheduler.load_state_dict(state["scheduler"])
-        start_step = int(state.get("step", 0))
+        start_step = 0 if resume_weights_only else int(state.get("step", 0))
     corpus = text or ("Orbit learns patterns from examples. Train small, test often, and share useful models. " * 200)
     model.train()
     for step in range(start_step + 1, train_cfg.steps + 1):
@@ -127,8 +129,8 @@ def run_training(
         if callback:
             callback(step, loss_value)
         if train_cfg.checkpoint_every and step % train_cfg.checkpoint_every == 0:
-            _save(checkpoint, model, optimizer, scheduler, cfg, preset, train_cfg, step)
-    _save(checkpoint, model, optimizer, scheduler, cfg, preset, train_cfg, step if 'step' in locals() else start_step)
+            _save(checkpoint, model, optimizer, scheduler, cfg, preset, train_cfg, step, model_metadata)
+    _save(checkpoint, model, optimizer, scheduler, cfg, preset, train_cfg, step if 'step' in locals() else start_step, model_metadata)
     return checkpoint
 
 
@@ -149,6 +151,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--checkpoint", type=Path, default=Path("orbit-checkpoint.pt"))
+    parser.add_argument("--model-name", default="Orbit")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--text", type=Path)
     parser.add_argument("--data", type=Path)
@@ -162,6 +165,11 @@ def main() -> None:
         warmup_steps=args.warmup_steps, weight_decay=args.weight_decay,
         grad_clip=args.grad_clip, precision=args.precision, scheduler_name=args.scheduler,
         checkpoint_every=args.checkpoint_every, seed=args.seed, resume=args.resume,
+        model_metadata={
+            "name": args.model_name, "identity": "Orbit",
+            "system_prompt": "You are Orbit, a local AI created and trained by the user.",
+            "architecture": "orbit-hybrid-moe-v1",
+        },
     )
     print(f"saved {args.checkpoint}")
 

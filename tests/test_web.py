@@ -2,6 +2,7 @@ import json
 import threading
 import time
 import urllib.request
+import zipfile
 
 import torch
 
@@ -24,6 +25,14 @@ def test_runtime_loads_and_serves_local_checkpoint(tmp_path):
     result = runtime.chat("hello", model_id="orbit-test", max_tokens=2, temperature=0)
     assert result["model"] == "orbit-test"
     assert isinstance(result["content"], str)
+
+
+def test_untrained_runtime_still_has_orbit_identity(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    result = runtime.chat("Who are you?", model_id="orbit")
+    assert result["model"] == "orbit"
+    assert "Orbit" in result["content"]
+    assert runtime.list_models() == []
 
 
 def test_http_health_models_and_openai_chat(tmp_path):
@@ -88,6 +97,7 @@ def test_local_training_creates_a_local_checkpoint(tmp_path):
         "warmup_steps": 0,
         "checkpoint_every": 0,
         "device": "cpu",
+        "model_name": "my-orbit",
         "text": "Orbit local training data. " * 10,
     })
     assert state["status"] in {"preparing", "running"}
@@ -96,8 +106,56 @@ def test_local_training_creates_a_local_checkpoint(tmp_path):
         time.sleep(0.05)
     finished = runtime.training_state()
     assert finished["status"] == "completed"
-    assert runtime.list_models()[0]["id"] == finished["model_id"]
+    assert runtime.list_models()[0]["id"] == "my-orbit"
+    runs = runtime.list_training_runs()
+    assert len(runs) == 1
+    assert runs[0]["model_id"] == "my-orbit"
+    assert "Orbit local training data" in runtime.training_run(runs[0]["id"])["content"]
     assert runtime._training_process is None
+
+
+def test_secondary_training_records_parent_and_server_export(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    payload = {
+        "preset": "local", "steps": 1, "batch_size": 1, "seq_len": 8,
+        "grad_accum": 1, "learning_rate": 3e-4, "warmup_steps": 0,
+        "checkpoint_every": 0, "device": "cpu", "model_name": "base",
+        "text": "Orbit secondary training data. " * 10,
+    }
+    runtime.start_training(payload)
+    deadline = time.time() + 20
+    while runtime.training_state()["status"] in {"preparing", "running", "stopping"} and time.time() < deadline:
+        time.sleep(0.05)
+    assert runtime.training_state()["status"] == "completed"
+    runtime.start_training({**payload, "model_name": "child", "base_model": "base"})
+    deadline = time.time() + 20
+    while runtime.training_state()["status"] in {"preparing", "running", "stopping"} and time.time() < deadline:
+        time.sleep(0.05)
+    assert runtime.training_state()["status"] == "completed"
+    child = next(row for row in runtime.list_models() if row["id"] == "child")
+    assert child["parent_model"] == "base"
+    assert len(child["training_runs"]) == 2
+
+    exported = runtime.export_model("child", "server")
+    with zipfile.ZipFile(exported["path"]) as archive:
+        names = archive.namelist()
+        assert any(name.endswith("/data/models/child.pt") for name in names)
+        assert any(name.endswith("/data/models/child.json") for name in names)
+        assert any(name.endswith("/run.sh") for name in names)
+    try:
+        runtime.export_model("child", "ollama")
+    except ValueError as exc:
+        assert "GGUF" in str(exc) or ".gguf" in str(exc)
+    else:
+        raise AssertionError("native checkpoint must not be mislabeled as Ollama-compatible")
+
+
+def test_teacher_api_settings_persist_locally(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    runtime._save_teacher_settings({"base_url": "https://example.com/v1", "model": "teacher", "api_key": "secret"})
+    reloaded = OrbitRuntime(tmp_path)
+    assert reloaded.teacher_settings()["api_key"] == "secret"
+    assert reloaded.teacher_settings_path.stat().st_mode & 0o077 == 0
 
 
 def test_multiple_model_scoped_api_keys(tmp_path):

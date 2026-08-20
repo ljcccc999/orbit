@@ -50,7 +50,10 @@ def main() -> None:
                 if request.get("command") != "chat":
                     raise ValueError("unknown command")
                 prompt = str(request.get("prompt", ""))
-                encoded = prompt.encode("utf-8")[-cfg.max_seq_len :]
+                system_prompt = str(request.get("system_prompt", "")).strip()
+                model_name = str(request.get("model_name", "Orbit")).strip() or "Orbit"
+                framed_prompt = f"<|system|>{system_prompt} The current model name is {model_name}.\n<|user|>{prompt}\n<|assistant|>"
+                encoded = framed_prompt.encode("utf-8")[-cfg.max_seq_len :]
                 ids = torch.tensor([list(encoded)], dtype=torch.long, device=device)
                 result = model.generate(
                     ids, max_new_tokens=int(request.get("max_tokens", 128)),
