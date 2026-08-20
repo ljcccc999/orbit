@@ -30,10 +30,12 @@ Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对�
 ## 一行安装并启动
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ljcccc999/orbit/main/install.sh | sh
+curl --retry 5 --retry-delay 2 --connect-timeout 20 -fsSL https://raw.githubusercontent.com/ljcccc999/orbit/main/install.sh | sh
 ```
 
 安装器会检查内存，在 `~/.orbit/runtime` 创建隔离运行环境，安装 Orbit，启动本机服务并打开浏览器。以后执行 `orbit` 即可再次打开。
+
+下载中断后可以安全地重新执行同一条命令。安装器会继续使用已有的隔离环境，并自动重试网络下载。
 
 Orbit 默认只监听 `127.0.0.1:8765`，不会暴露给局域网或互联网。
 

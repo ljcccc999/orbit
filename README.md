@@ -30,10 +30,12 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 ## One-line install and launch
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ljcccc999/orbit/main/install.sh | sh
+curl --retry 5 --retry-delay 2 --connect-timeout 20 -fsSL https://raw.githubusercontent.com/ljcccc999/orbit/main/install.sh | sh
 ```
 
 The installer checks memory, creates an isolated runtime under `~/.orbit/runtime`, installs Orbit, starts the local service, and opens the browser. Run `orbit` later to open it again.
+
+The command is safe to run again after an interrupted download. It resumes the existing isolated runtime and retries network downloads automatically.
 
 Orbit listens on `127.0.0.1:8765` by default. It is not exposed to the local network or the internet.
 

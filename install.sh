@@ -15,6 +15,24 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+download() {
+  url="$1"
+  destination="$2"
+  attempt=1
+  while [ "$attempt" -le 5 ]; do
+    if curl -fL --connect-timeout 20 --max-time 300 "$url" -o "$destination"; then
+      return 0
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      printf 'Download interrupted. Retrying (%s/5)…\n' "$attempt" >&2
+      sleep $((attempt * 2))
+    fi
+    attempt=$((attempt + 1))
+  done
+  printf 'Download failed after 5 attempts. Check the network connection and run the installer again.\n' >&2
+  return 1
+}
+
 memory_gb() {
   if command -v sysctl >/dev/null 2>&1; then
     bytes=$(sysctl -n hw.memsize 2>/dev/null || true)
@@ -58,7 +76,7 @@ else
   fi
   TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/orbit-install.XXXXXX")
   printf 'Downloading Orbit…\n'
-  curl -fsSL "$ARCHIVE_URL" -o "$TEMP_DIR/orbit.tar.gz"
+  download "$ARCHIVE_URL" "$TEMP_DIR/orbit.tar.gz"
   tar -xzf "$TEMP_DIR/orbit.tar.gz" -C "$TEMP_DIR"
   SOURCE_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 2 -name pyproject.toml -print | head -n 1 | sed 's#/pyproject.toml$##')
   if [ -z "$SOURCE_DIR" ]; then
@@ -74,8 +92,8 @@ if [ ! -x "$RUNTIME_DIR/bin/python" ]; then
 fi
 
 printf 'Installing Orbit and its local AI runtime…\n'
-"$RUNTIME_DIR/bin/python" -m pip install --upgrade pip
-"$RUNTIME_DIR/bin/python" -m pip install --upgrade "$SOURCE_DIR"
+"$RUNTIME_DIR/bin/python" -m pip install --retries 8 --timeout 60 --upgrade pip
+"$RUNTIME_DIR/bin/python" -m pip install --retries 8 --timeout 60 --upgrade "$SOURCE_DIR"
 ln -sf "$RUNTIME_DIR/bin/orbit" "$BIN_DIR/orbit"
 
 printf '\nOrbit is installed. Models and training data stay in %s.\n' "$INSTALL_ROOT"
