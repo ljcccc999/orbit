@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import Darwin
 import WebKit
 
 private let orbitURL = URL(string: "http://127.0.0.1:8765")!
@@ -380,6 +381,7 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
             try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try PropertyListSerialization.data(fromPropertyList: payload, format: .xml, options: 0)
             try data.write(to: path, options: .atomic)
+            activateLaunchAgent(label: serviceMenuAgentLabel, path: path)
         } catch {
             NSLog("Could not register Orbit API menu item: %@", error.localizedDescription)
         }
@@ -388,7 +390,43 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
     private func ensureServiceMenu() {
         guard let bundle = serviceMenuBundle() else { return }
         if NSRunningApplication.runningApplications(withBundleIdentifier: serviceMenuBundleIdentifier).isEmpty {
-            NSWorkspace.shared.open(bundle)
+            let path = serviceMenuAgentPath()
+            activateLaunchAgent(label: serviceMenuAgentLabel, path: path)
+            if NSRunningApplication.runningApplications(withBundleIdentifier: serviceMenuBundleIdentifier).isEmpty {
+                NSWorkspace.shared.open(bundle)
+            }
+        }
+    }
+
+    /// Writing a LaunchAgent plist does not load it into the current launchd
+    /// session.  Without bootstrapping it here, the status-bar helper only
+    /// appears after a later login (and can disappear when the app is hidden).
+    private func activateLaunchAgent(label: String, path: URL) {
+        let domain = "gui/\(getuid())"
+        let service = "\(domain)/\(label)"
+
+        let print = Process()
+        print.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        print.arguments = ["print", service]
+        try? print.run()
+        print.waitUntilExit()
+        if print.terminationStatus == 0 { return }
+
+        // Do not create a second menu-bar process if the helper was already
+        // started by LaunchServices; just leave the newly written agent for
+        // the next login.
+        if !NSRunningApplication.runningApplications(withBundleIdentifier: serviceMenuBundleIdentifier).isEmpty {
+            return
+        }
+
+        let bootstrap = Process()
+        bootstrap.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        bootstrap.arguments = ["bootstrap", domain, path.path]
+        do {
+            try bootstrap.run()
+            bootstrap.waitUntilExit()
+        } catch {
+            NSLog("Could not load Orbit LaunchAgent: %@", error.localizedDescription)
         }
     }
 
