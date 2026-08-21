@@ -5,7 +5,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from threading import Event
+from threading import Event, Thread
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -43,7 +43,7 @@ class TeacherConfig:
             raise ValueError("自动生成样本数必须在 1 到 100 之间")
 
 
-def _request(endpoint: str, api_key: str, body: dict, attempts: int = 3) -> dict:
+def _request(endpoint: str, api_key: str, body: dict, attempts: int = 3, stop_event: Event | None = None) -> dict:
     encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         endpoint,
@@ -53,18 +53,41 @@ def _request(endpoint: str, api_key: str, body: dict, attempts: int = 3) -> dict
     )
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
-        try:
-            with urllib.request.urlopen(request, timeout=90) as response:
-                return json.loads(response.read())
-        except urllib.error.HTTPError as exc:
-            detail = exc.read(1000).decode("utf-8", errors="replace")
-            if exc.code not in {408, 429, 500, 502, 503, 504}:
-                raise RuntimeError(f"教师 API 返回 HTTP {exc.code}：{detail}") from exc
-            last_error = RuntimeError(f"教师 API 暂时不可用（HTTP {exc.code}）")
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            last_error = exc
+        if stop_event is not None and stop_event.is_set():
+            raise InterruptedError("用户停止了 AI 数据生成")
+        result: dict | None = None
+        request_error: Exception | None = None
+
+        def request_once() -> None:
+            nonlocal result, request_error
+            try:
+                with urllib.request.urlopen(request, timeout=90) as response:
+                    result = json.loads(response.read())
+            except Exception as exc:  # the supervisor below converts it to a normal request error
+                request_error = exc
+
+        request_thread = Thread(target=request_once, name="orbit-teacher-request", daemon=True)
+        request_thread.start()
+        while request_thread.is_alive():
+            if stop_event is not None and stop_event.wait(0.2):
+                raise InterruptedError("用户停止了 AI 数据生成")
+            request_thread.join(0.2)
+        if request_error is None and isinstance(result, dict):
+            return result
+        if isinstance(request_error, urllib.error.HTTPError):
+            detail = request_error.read(1000).decode("utf-8", errors="replace")
+            if request_error.code not in {408, 429, 500, 502, 503, 504}:
+                raise RuntimeError(f"教师 API 返回 HTTP {request_error.code}：{detail}") from request_error
+            last_error = RuntimeError(f"教师 API 暂时不可用（HTTP {request_error.code}）")
+        elif isinstance(request_error, (urllib.error.URLError, TimeoutError, json.JSONDecodeError)):
+            last_error = request_error
+        else:
+            last_error = request_error or RuntimeError("教师 API 返回了无法识别的响应")
         if attempt < attempts:
-            time.sleep(attempt * 2)
+            if stop_event is not None and stop_event.wait(attempt * 2):
+                raise InterruptedError("用户停止了 AI 数据生成")
+            if stop_event is None:
+                time.sleep(attempt * 2)
     raise RuntimeError(f"教师 API 请求失败：{last_error}")
 
 
@@ -115,7 +138,7 @@ def generate_dataset(
         content = ""
         last_error: Exception | None = None
         for content_attempt in range(1, 4):
-            data = _request(endpoint, api_key.strip(), payload)
+            data = _request(endpoint, api_key.strip(), payload, stop_event=stop_event)
             try:
                 content = str(data["choices"][0]["message"]["content"]).strip()
             except (KeyError, IndexError, TypeError) as exc:
@@ -125,7 +148,8 @@ def generate_dataset(
                 break
             last_error = RuntimeError("教师 API 返回了空内容")
             if content_attempt < 3:
-                time.sleep(content_attempt * 2)
+                if stop_event.wait(content_attempt * 2):
+                    raise InterruptedError("用户停止了 AI 数据生成")
         if not content:
             raise last_error or RuntimeError("教师 API 返回了空内容")
         chunks.append(content)

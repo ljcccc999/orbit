@@ -497,6 +497,9 @@ class OrbitRuntime:
     def delete_training_run(self, run_id: str) -> dict[str, str]:
         if Path(run_id).name != run_id or not run_id:
             raise ValueError("无效的训练记录")
+        with self._state_lock:
+            if self._training.get("run_id") == run_id and self._work_thread and self._work_thread.is_alive():
+                raise RuntimeError("训练正在运行，请先停止训练后再删除历史")
         root = self.training_runs_root / run_id
         path = root / "run.json"
         if not path.is_file():
@@ -673,6 +676,19 @@ class OrbitRuntime:
                         process.stdin.flush()
                     except (OSError, BrokenPipeError):
                         pass
+                    # MPS or a native kernel can occasionally stop servicing
+                    # the worker's stdin thread. Never leave the UI in
+                    # "Stopping" forever: give the cooperative stop a short
+                    # grace period, then terminate only this training child.
+                    deadline = time.monotonic() + 5
+                    while process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.2)
+                    if process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
                     return
 
         threading.Thread(target=guard, name="orbit-memory-guard", daemon=True).start()
@@ -695,7 +711,7 @@ class OrbitRuntime:
                 elif event_type == "fatal":
                     raise RuntimeError(str(event.get("error", "隔离训练进程失败")))
             return_code = process.wait()
-            if return_code != 0 and not final_type:
+            if return_code != 0 and not final_type and not self._stop_event.is_set():
                 raise RuntimeError(f"隔离训练进程异常退出（{return_code}）")
             stopped = final_type == "stopped" or self._stop_event.is_set()
             with self._state_lock:
@@ -1003,9 +1019,72 @@ class OrbitRuntime:
             raise FileNotFoundError(f"找不到可删除的本地模型：{model_id}")
         return {"status": "deleted", "model": model_id, "removed": removed, "training_history_preserved": True}
 
+    def _delete_stopped_training_model(self) -> dict[str, Any]:
+        """Delete the checkpoint belonging to a training job that already stopped.
+
+        A safe stop deliberately leaves the checkpoint on disk.  The normal
+        model-delete endpoint is useful once that checkpoint appears in the
+        model list, but the training page also needs a direct way to remove an
+        unfinished run—even when the worker stopped before writing its first
+        checkpoint.  Keep the run record and its dataset so the training
+        history remains inspectable.
+        """
+        with self._state_lock:
+            state = dict(self._training)
+        status = str(state.get("status", ""))
+        model_id = str(state.get("model_id") or "").strip()
+        run_id = str(state.get("run_id") or "").strip()
+        if status not in {"stopped", "failed", "stopping"}:
+            raise RuntimeError("只能删除已经停止的训练模型")
+        if not model_id:
+            raise RuntimeError("这次训练没有生成可删除的模型文件")
+        if Path(model_id).name != model_id or model_id in {"", ".", ".."}:
+            raise ValueError("无效的模型名称")
+
+        with self._state_lock:
+            if self._hub_upload.get("model") == model_id and self._hub_upload.get("status") in {"hashing", "uploading"}:
+                raise RuntimeError("模型正在上传，暂时不能删除")
+
+        # A user may have loaded the checkpoint after stopping.  Reuse the
+        # normal unload path before removing the exact model files.
+        if self.active_model_id == model_id:
+            self.unload_model()
+        removed = self._remove_model_files(model_id)
+
+        if run_id and Path(run_id).name == run_id:
+            run_path = self.training_runs_root / run_id / "run.json"
+            if run_path.is_file():
+                try:
+                    run = json.loads(run_path.read_text(encoding="utf-8"))
+                    if isinstance(run, dict):
+                        run.update(
+                            status="stopped_deleted",
+                            completed_at=run.get("completed_at") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                            message="训练已停止，未完成模型已删除",
+                        )
+                        self._save_run(run)
+                except (OSError, json.JSONDecodeError):
+                    pass
+
+        with self._state_lock:
+            self._training.update(status="stopped_deleted", message="训练已停止，未完成模型已删除", checkpoint="")
+        return {
+            "status": "stopped_deleted",
+            "model": model_id,
+            "removed": removed,
+            "training_history_preserved": True,
+        }
+
     def stop_training(self, delete_checkpoint: bool = False) -> dict[str, Any]:
         with self._state_lock:
-            if not self._work_thread or not self._work_thread.is_alive():
+            running = bool(self._work_thread and self._work_thread.is_alive())
+            current_status = str(self._training.get("status", ""))
+        if delete_checkpoint and not running and current_status in {"stopped", "failed", "stopping"}:
+            return {**self.training_state(), **self._delete_stopped_training_model()}
+        if not delete_checkpoint and not running and current_status == "stopping":
+            return self.training_state()
+        with self._state_lock:
+            if not running:
                 raise RuntimeError("当前没有正在运行的训练或数据生成任务")
             self._delete_after_stop = bool(delete_checkpoint)
             self._stop_reason = "用户已请求停止并删除未完成模型" if delete_checkpoint else "用户已请求安全停止"

@@ -52,6 +52,31 @@ def test_untrained_runtime_still_has_orbit_identity(tmp_path):
     assert runtime.list_models() == []
 
 
+def test_stopped_training_can_delete_model_and_keep_history(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    model_id = "stopped-model"
+    run_id = "run-stopped-model"
+    checkpoint = runtime.models_root / f"{model_id}.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    (runtime.models_root / f"{model_id}.json").write_text("{}", encoding="utf-8")
+    runtime._save_run({
+        "id": run_id, "status": "stopped", "model_id": model_id,
+        "model_name": model_id, "dataset": "", "training_dataset": "",
+    })
+    with runtime._state_lock:
+        runtime._training.update(
+            status="stopped", model_id=model_id, run_id=run_id,
+            checkpoint=str(checkpoint), message="用户已请求安全停止",
+        )
+
+    result = runtime.stop_training(delete_checkpoint=True)
+
+    assert result["status"] == "stopped_deleted"
+    assert not checkpoint.exists()
+    assert not (runtime.models_root / f"{model_id}.json").exists()
+    assert runtime.training_run(run_id)["status"] == "stopped_deleted"
+
+
 def test_identity_cannot_be_overwritten_by_prompt_or_old_metadata(tmp_path):
     runtime = OrbitRuntime(tmp_path)
     (runtime.models_root / "legacy.json").write_text(json.dumps({
@@ -95,6 +120,10 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "function renderTeacherProfiles" in PAGE
     assert "model:$('chatModel').value||null" in PAGE
     assert "/api/training/stop-delete" in PAGE
+    assert "data-delete-run" in PAGE
+    assert "Training history deleted." in PAGE
+    assert "function resetTrainingForm" in PAGE
+    assert "actionConfirm(t('deleteProfile')" in PAGE
     assert "stopped_deleted" in PAGE
     assert 'id="createRemoteAI"' in PAGE
     assert 'id="importRemote"' not in PAGE
