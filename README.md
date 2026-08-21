@@ -105,6 +105,8 @@ The Training page offers two stop actions: **Safe stop and keep checkpoint** pre
 
 The advanced-parameter panel automatically recommends the safest configuration for the selected model size, device, available memory, sample count, and goal. It shows the estimated total time, time per step, peak memory, and the effect of changing steps, batch size, sequence length, gradient accumulation, and model scale. These are pre-training estimates; once a job starts, the measured step rate and remaining-time ETA replace them. On a typical 24 GB Apple Silicon Mac, the 300M preset with a small bilingual coding/world-knowledge run is the recommended starting point; larger presets may be blocked by the local memory gate or require a remote GPU.
 
+On Apple Silicon, the local MPS path uses FP16 autocast, fused causal attention, and sparse top-k expert evaluation. The automatic 300M starting profile is bounded to a 512-token context and one accumulation pass so a first run does not silently expand into an all-day job. FP32 remains available for numerical debugging but is expected to be substantially slower.
+
 ## Collaborative training
 
 The **Community** page lets anyone write an idea, factual source, or dialogue example and export it as an `.orbit-contribution.zip` package. Another user can import the package into a local review queue. Machine pre-screening can quarantine obvious dangerous instructions or personal information; factual material requires an HTTPS source and explicit reviewer verification. Only approved contributions can be assembled into training text.
