@@ -680,6 +680,11 @@ class OrbitRuntime:
     def _run_local_training(self, payload: dict[str, Any], text: str) -> None:
         self.unload_model()
         preset, train_cfg, checkpoint, model_id, display_name, parent_model = self._prepare_training(payload, text)
+        with self._state_lock:
+            # Publish the target before creating the worker.  This makes a
+            # stop-and-delete request during the preparation window address
+            # the exact model path even if no checkpoint has been written yet.
+            self._training.update(model_id=model_id, model_name=display_name, checkpoint=str(checkpoint))
         requested_device = str(payload.get("device", "auto"))
         stamp = time.strftime("%Y%m%d-%H%M%S")
         dataset = Path(str(payload.get("_dataset_path", ""))) if payload.get("_dataset_path") else self.datasets_root / f"training-input-{stamp}.txt"
@@ -945,10 +950,36 @@ class OrbitRuntime:
                     self._training.update(usage=usage, dataset=str(dataset))
             except InterruptedError as exc:
                 with self._state_lock:
-                    self._training.update(status="stopped", message=str(exc))
+                    delete_after_stop = bool(self._delete_after_stop)
+                    pending = self._pending_training
+                    dataset = self._training.get("dataset") or (pending[3] if pending else "")
+                if delete_after_stop:
+                    self._remove_training_dataset(dataset)
+                with self._state_lock:
+                    if delete_after_stop:
+                        self._pending_training = None
+                        self._delete_after_stop = False
+                    self._training.update(
+                        status="stopped_deleted" if delete_after_stop else "stopped",
+                        message=("训练已停止，样本和未完成模型已删除" if delete_after_stop else str(exc)),
+                        dataset="" if delete_after_stop else self._training.get("dataset", ""),
+                    )
             except Exception as exc:
                 with self._state_lock:
-                    self._training.update(status="failed", message=str(exc))
+                    delete_after_stop = bool(self._delete_after_stop)
+                    pending = self._pending_training
+                    dataset = self._training.get("dataset") or (pending[3] if pending else "")
+                if delete_after_stop:
+                    self._remove_training_dataset(dataset)
+                with self._state_lock:
+                    if delete_after_stop:
+                        self._pending_training = None
+                        self._delete_after_stop = False
+                    self._training.update(
+                        status="stopped_deleted" if delete_after_stop else "failed",
+                        message=("训练已停止，样本和未完成模型已删除" if delete_after_stop else str(exc)),
+                        dataset="" if delete_after_stop else self._training.get("dataset", ""),
+                    )
 
         self._work_thread = threading.Thread(target=worker, name="orbit-auto-training", daemon=True)
         self._work_thread.start()
@@ -1229,9 +1260,7 @@ class OrbitRuntime:
         run_id = str(state.get("run_id") or "").strip()
         if status not in {"stopped", "failed", "stopping", "waiting_memory", "needs_memory"}:
             raise RuntimeError("只能删除已经停止的训练模型")
-        if not model_id:
-            raise RuntimeError("这次训练没有生成可删除的模型文件")
-        if Path(model_id).name != model_id or model_id in {"", ".", ".."}:
+        if model_id and (Path(model_id).name != model_id or model_id in {"", ".", ".."}):
             raise ValueError("无效的模型名称")
 
         with self._state_lock:
@@ -1240,9 +1269,22 @@ class OrbitRuntime:
 
         # A user may have loaded the checkpoint after stopping.  Reuse the
         # normal unload path before removing the exact model files.
-        if self.active_model_id == model_id:
+        if model_id and self.active_model_id == model_id:
             self.unload_model()
-        removed = self._remove_model_files(model_id)
+        removed = self._remove_model_files(model_id) if model_id else []
+
+        # AI generation and memory-wait states can end before a checkpoint or
+        # training run exists.  They still need a reliable delete action: only
+        # remove temporary datasets inside Orbit's dataset directory.
+        with self._state_lock:
+            pending = self._pending_training
+            state_dataset = state.get("dataset")
+        candidates = [state_dataset]
+        if pending:
+            candidates.append(pending[3])
+        for candidate in candidates:
+            if self._remove_training_dataset(candidate):
+                removed.append(Path(str(candidate)).name)
 
         if run_id and Path(run_id).name == run_id:
             run_path = self.training_runs_root / run_id / "run.json"
@@ -1261,13 +1303,31 @@ class OrbitRuntime:
 
         with self._state_lock:
             self._pending_training = None
-            self._training.update(status="stopped_deleted", message="训练已停止，未完成模型已删除", checkpoint="")
+            self._delete_after_stop = False
+            self._training.update(
+                status="stopped_deleted",
+                message="训练已停止，样本和未完成模型已删除",
+                checkpoint="", dataset="",
+            )
         return {
             "status": "stopped_deleted",
             "model": model_id,
             "removed": removed,
             "training_history_preserved": True,
         }
+
+    def _remove_training_dataset(self, value: Any) -> bool:
+        """Remove only a temporary training dataset owned by Orbit."""
+        if not value:
+            return False
+        candidate = Path(str(value))
+        try:
+            if candidate.is_file() and candidate.resolve().parent == self.datasets_root.resolve():
+                candidate.unlink()
+                return True
+        except OSError:
+            pass
+        return False
 
     def stop_training(self, delete_checkpoint: bool = False) -> dict[str, Any]:
         with self._state_lock:
