@@ -78,6 +78,10 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "serviceUnavailable:'Orbit 本地服务暂时不可用，正在重新连接…'" in PAGE
     assert 'id="newChat"' in PAGE
     assert 'id="stopDeleteTraining"' in PAGE
+    assert 'id="loadActiveModel"' in PAGE
+    assert "thinking-bubble" in PAGE
+    assert 'autocomplete="new-password"' in PAGE
+    assert 'data-page="settings"' in PAGE
     assert "/api/training/stop-delete" in PAGE
     assert "stopped_deleted" in PAGE
     assert 'data-i18n="examplesHelp"' in PAGE
@@ -278,6 +282,7 @@ def test_multiple_model_scoped_api_keys(tmp_path):
     _write_tiny_checkpoint(runtime, "one")
     _write_tiny_checkpoint(runtime, "two")
     key = runtime.create_api_key("Agent one", "one")
+    assert key["key"].startswith("sk-")
     assert runtime.authenticate_api_key(key["key"], "one") is not None
     assert runtime.authenticate_api_key(key["key"], "two") is None
     assert len(runtime.list_api_keys()) == 2

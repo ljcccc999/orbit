@@ -61,6 +61,7 @@ class OrbitRuntime:
         self._work_thread: threading.Thread | None = None
         self._training_process: subprocess.Popen[str] | None = None
         self._load_thread: threading.Thread | None = None
+        self._load_cancel = threading.Event()
         self._model: Any = None
         self._model_id: str | None = None
         self._model_device = "cpu"
@@ -89,7 +90,7 @@ class OrbitRuntime:
         legacy = self.data_root / "api-key"
         value = legacy.read_text(encoding="utf-8").strip() if legacy.is_file() else ""
         if len(value) < 24:
-            value = "orbit_" + secrets.token_urlsafe(32)
+            value = "sk-" + secrets.token_urlsafe(32)
         rows = [{"id": secrets.token_hex(8), "name": "Default", "key": value, "model": "*", "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}]
         self._save_api_keys(rows)
         legacy.unlink(missing_ok=True)
@@ -200,7 +201,7 @@ class OrbitRuntime:
             self._checkpoint_for(model)
         row = {
             "id": secrets.token_hex(8), "name": name,
-            "key": "orbit_" + secrets.token_urlsafe(32), "model": model,
+            "key": "sk-" + secrets.token_urlsafe(32), "model": model,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         }
         with self._state_lock:
@@ -850,6 +851,8 @@ class OrbitRuntime:
             self._model_id = model_id
             assert process.stdout is not None
             while True:
+                if self._load_cancel.is_set():
+                    raise RuntimeError("模型加载已取消")
                 line = process.stdout.readline()
                 if not line:
                     raise RuntimeError("隔离推理进程在模型就绪前退出")
@@ -872,6 +875,7 @@ class OrbitRuntime:
                 if self._loading.get("model_id") == model_id:
                     return self.loading_state()
                 raise RuntimeError("另一个模型正在加载")
+            self._load_cancel.clear()
             self._set_loading("queued", 0, "等待加载", model_id)
 
         def worker() -> None:
@@ -879,7 +883,10 @@ class OrbitRuntime:
                 self.load_model(model_id)
             except Exception as exc:
                 self.unload_model()
-                self._set_loading("failed", 0, str(exc), model_id)
+                if self._load_cancel.is_set():
+                    self._set_loading("idle", 0, "模型加载已取消", None)
+                else:
+                    self._set_loading("failed", 0, str(exc), model_id)
 
         self._load_thread = threading.Thread(target=worker, name="orbit-model-loader", daemon=True)
         self._load_thread.start()
@@ -890,6 +897,10 @@ class OrbitRuntime:
         gc.collect()
 
     def unload_model(self) -> dict[str, Any]:
+        # Set cancellation before taking the model lock. Loading holds this
+        # lock while waiting for worker progress; this keeps the unload API
+        # responsive and lets the worker exit cleanly instead of deadlocking.
+        self._load_cancel.set()
         with self._model_lock:
             previous = self._model_id
             process = self._model

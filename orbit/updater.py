@@ -53,7 +53,7 @@ def current_version() -> str:
     try:
         return metadata.version("orbit-ai")
     except metadata.PackageNotFoundError:
-        return "0.6.8"
+        return "0.6.9"
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
