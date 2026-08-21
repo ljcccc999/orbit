@@ -103,6 +103,7 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "serviceUnavailable:'Orbit 本地服务暂时不可用，正在重新连接…'" in PAGE
     assert 'id="newChat"' in PAGE
     assert 'id="stopDeleteTraining"' in PAGE
+    assert 'id="continueTrainingButton"' in PAGE
     assert 'id="loadActiveModel"' in PAGE
     assert 'id="chatModel"' in PAGE
     assert "thinking-bubble" in PAGE
@@ -121,6 +122,7 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "model:$('chatModel').value||null" in PAGE
     assert "/api/training/stop-delete" in PAGE
     assert "data-delete-run" in PAGE
+    assert "data-continue-run" in PAGE
     assert "Training history deleted." in PAGE
     assert "function resetTrainingForm" in PAGE
     assert "actionConfirm(t('deleteProfile')" in PAGE
