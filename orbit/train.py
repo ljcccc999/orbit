@@ -36,10 +36,14 @@ def select_device(requested: str = "auto") -> torch.device:
 
 
 def _autocast(device: torch.device, precision: str):
-    if device.type != "cuda" or precision == "fp32":
+    # Apple Silicon supports torch.autocast("mps") as well.  The old CUDA-only
+    # branch silently made every local Mac run FP32, which is especially costly
+    # for the 300M preset.  Keep explicit FP32 available for debugging, while
+    # making auto use the accelerator's practical half precision.
+    if device.type not in {"cuda", "mps"} or precision == "fp32":
         return nullcontext()
-    dtype = torch.float16 if precision == "fp16" else torch.bfloat16
-    return torch.autocast(device_type="cuda", dtype=dtype)
+    dtype = torch.float16 if precision in {"auto", "fp16"} else torch.bfloat16
+    return torch.autocast(device_type=device.type, dtype=dtype)
 
 
 def _save(path: Path, model, optimizer, scheduler, cfg, preset, train_cfg, step, metadata=None):

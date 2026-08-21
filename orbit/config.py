@@ -23,6 +23,11 @@ class OrbitConfig:
     vision_layers: int = 2
     vision_heads: int = 4
     vision_patch_size: int = 14
+    # Use the fused causal attention implementation by default.  The previous
+    # recurrent reference path is retained for compatibility/debugging, but it
+    # performs a Python loop for every token and is not suitable for local
+    # training on MPS.
+    fast_attention: bool = True
 
     @classmethod
     def tiny(cls) -> "OrbitConfig":

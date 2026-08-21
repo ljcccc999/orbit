@@ -53,6 +53,7 @@ class DeltaAttention(nn.Module):
         super().__init__()
         d, h, k = cfg.d_model, cfg.n_heads, cfg.head_dim
         self.n_heads, self.head_dim = h, k
+        self.fast_attention = bool(getattr(cfg, "fast_attention", True))
         self.q_proj = nn.Linear(d, h * k, bias=False)
         self.k_proj = nn.Linear(d, h * k, bias=False)
         self.v_proj = nn.Linear(d, h * k, bias=False)
@@ -72,6 +73,15 @@ class DeltaAttention(nn.Module):
         q = F.normalize(self._heads(F.silu(self.q_conv(self.q_proj(x)))), dim=-1)
         k = F.normalize(self._heads(F.silu(self.k_conv(self.k_proj(x)))), dim=-1)
         v = self._heads(F.silu(self.v_conv(self.v_proj(x))))
+        if getattr(self, "fast_attention", False):
+            # This keeps the same projections and causal ordering while using
+            # PyTorch's device kernel instead of a Python loop over tokens.
+            # It is materially faster on MPS and CUDA, especially with the
+            # half-precision training path.
+            out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            out = out.transpose(1, 2)
+            out = self.out_norm(out).reshape(b, t, -1)
+            return self.out(torch.sigmoid(self.gate(x)) * out)
         beta = torch.sigmoid(self.beta(x)).transpose(1, 2).unsqueeze(-1)
         decay_logits = self.decay(x).view(b, t, self.n_heads, self.head_dim).transpose(1, 2)
         scale = self.log_scale.exp().view(1, self.n_heads, 1, 1)
@@ -126,10 +136,24 @@ class LatentMoE(nn.Module):
         logits = self.router(x)
         values, indices = logits.topk(self.top_k, dim=-1)
         weights = values.softmax(dim=-1)
-        probs = torch.zeros_like(logits).scatter(-1, indices, weights)
-        z, routed = self.down(x), torch.zeros_like(x[..., : self.down.out_features])
+        # MPS autocast can keep router logits in FP16 while top-k softmax is
+        # accumulated in FP32.  Scatter requires matching dtypes.
+        probs = torch.zeros_like(logits).scatter(-1, indices, weights.to(logits.dtype))
+        z = self.down(x)
+        # Only top-k experts have non-zero routing weights.  Evaluating every
+        # expert for every token made the sparse MoE dense in practice.
+        flat_z = z.reshape(-1, z.shape[-1])
+        flat_probs = probs.reshape(-1, probs.shape[-1])
+        routed_flat = torch.zeros_like(flat_z)
         for expert_id, expert in enumerate(self.routed):
-            routed = routed + expert(z) * probs[..., expert_id : expert_id + 1]
+            weights = flat_probs[:, expert_id]
+            selected = torch.nonzero(weights > 0, as_tuple=False).flatten()
+            if selected.numel() == 0:
+                continue
+            values = expert(flat_z.index_select(0, selected))
+            values = values * weights.index_select(0, selected).unsqueeze(-1)
+            routed_flat = routed_flat.index_add(0, selected, values)
+        routed = routed_flat.reshape(*x.shape[:-1], self.down.out_features)
         y = self.up(self.latent_norm(routed))
         for expert in self.shared:
             y = y + expert(x)

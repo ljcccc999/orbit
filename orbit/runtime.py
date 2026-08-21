@@ -376,6 +376,14 @@ class OrbitRuntime:
             seq_len = max(256, seq_len // 2)
         if device == "cpu":
             seq_len = min(seq_len, 1024)
+        # On Apple Silicon, ``auto`` resolves to MPS in the bundled runtime.
+        # The old recommendation left the 300M preset at 1024 tokens and eight
+        # accumulation passes, which is a poor local-MPS starting point even
+        # when memory is available.  Keep the first run bounded so it can
+        # finish in a useful time; users can still edit these fields upward.
+        local_mps = device == "mps" or (device == "auto" and sys.platform == "darwin")
+        if local_mps:
+            seq_len = min(seq_len, 512)
         data_units = examples if bool(payload.get("assisted")) else max(1, text_chars // max(256, seq_len))
         scale_examples = {"300m": 20, "1b": 36, "3b": 56, "7b": 72, "14b": 88, "38b": 100}[preset]
         goal_chars = max(0, min(20_000, int(payload.get("goal_chars", 0))))
@@ -385,19 +393,23 @@ class OrbitRuntime:
         checkpoint_every = max(25, min(250, steps // 5))
         config = base.with_overrides(
             steps=steps,
-            batch_size=1 if pressure > 0.55 or device == "cpu" else base.batch_size,
+            batch_size=1 if pressure > 0.55 or device == "cpu" or local_mps else base.batch_size,
             seq_len=seq_len,
+            grad_accum=(1 if preset == "300m" else max(1, base.grad_accum // 4)) if local_mps else base.grad_accum,
             warmup_steps=warmup,
             checkpoint_every=checkpoint_every,
-            precision="auto",
+            precision="fp16" if local_mps else "auto",
         )
         # Pre-training estimates are deliberately labeled as rough. Once a
         # run starts, training_state() replaces them with measured ETA from
         # completed optimizer steps. The baseline is calibrated to the local
         # 300M MPS path and scaled by parameter count and token work.
         parameter_scale = max(0.25, (model.estimate_parameters() / 308_450_304) ** 0.85)
-        token_work = (config.seq_len / 512) * config.batch_size * (config.grad_accum / 8)
-        device_factor = {"cpu": 2.0, "mps": 1.0, "cuda": 0.45}.get(device, 1.0)
+        # Attention work grows faster than linearly with context length.  This
+        # is still a rough pre-run estimate; live ETA is always based on real
+        # completed optimizer steps.
+        token_work = (config.seq_len / 512) ** 1.5 * config.batch_size * (config.grad_accum / 8)
+        device_factor = {"cpu": 2.0, "mps": 0.65, "cuda": 0.45}.get("mps" if local_mps else device, 1.0)
         estimated_step_seconds = max(1.0, 300.0 * parameter_scale * token_work * device_factor)
         estimated_training_seconds = round(estimated_step_seconds * config.steps + 120)
         activation_ratio = (config.seq_len / max(1, base.seq_len)) * (config.batch_size / max(1, base.batch_size))
