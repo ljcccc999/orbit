@@ -64,9 +64,9 @@ def main() -> None:
         print(json.dumps(updater.as_dict(info), ensure_ascii=False))
         if info.error or args.check or not info.available:
             return
-        service.stop()
-        code = updater.install_latest(info)
-        raise SystemExit(code)
+        print("Orbit 更新已排队；如果正在训练，会等 checkpoint 保存后再安全重启。")
+        if not updater.schedule_install(info):
+            raise SystemExit("无法排队 Orbit 更新")
     elif args.command == "chat":
         service.ensure_running()
         payload = {"prompt": args.message}

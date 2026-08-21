@@ -37,6 +37,38 @@ class OrbitHTTPServer(ThreadingHTTPServer):
         super().__init__(address, Handler)
         self.runtime = runtime
         self.verbose = False
+        self._update_lock = threading.Lock()
+        self._update_scheduled = False
+        self._automatic_update_thread = threading.Thread(
+            target=self._automatic_update_loop,
+            name="orbit-auto-updater",
+            daemon=True,
+        )
+        self._automatic_update_thread.start()
+
+    def queue_update(self, info: updater.UpdateInfo) -> bool:
+        """Queue one update; the detached updater waits for training safely."""
+        with self._update_lock:
+            if self._update_scheduled:
+                return True
+            if not updater.schedule_install(info):
+                return False
+            self._update_scheduled = True
+            return True
+
+    def _automatic_update_loop(self) -> None:
+        # Do not make startup depend on GitHub or a proxy. The first check is
+        # delayed, and all later checks are best-effort background work.
+        time.sleep(30)
+        while True:
+            try:
+                if self.runtime.settings.get().get("auto_update"):
+                    info = updater.check()
+                    if info.available and self.queue_update(info):
+                        return
+            except Exception:
+                pass
+            time.sleep(300)
 
     def server_bind(self) -> None:
         # HTTPServer normally performs reverse DNS after binding. A local-only
@@ -160,6 +192,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.hub_upload_state())
             elif path == "/api/update/check":
                 self._json(200, updater.as_dict(updater.check()))
+            elif path == "/api/settings":
+                self._json(200, self.server.runtime.settings.get())
             elif path.startswith("/api/community/export/"):
                 self._download_community(path.split("/")[4])
             elif path.startswith("/api/community/"):
@@ -238,9 +272,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not info.available:
                     self._json(200, updater.as_dict(info))
                     return
-                if not updater.schedule_install(info):
+                if not self.server.queue_update(info):
                     raise RuntimeError("no update is available")
-                self._json(202, {**updater.as_dict(info), "status": "installing"})
+                training_status = self.server.runtime.training_state().get("status")
+                queued = training_status in {"preparing", "generating", "waiting_memory", "needs_memory", "running", "stopping"}
+                self._json(202, {**updater.as_dict(info), "status": "queued_after_training" if queued else "installing"})
+            elif path == "/api/settings":
+                self._json(200, self.server.runtime.settings.update(data))
             elif path == "/api/conversations":
                 self._json(201, self.server.runtime.conversations.create())
             elif path == "/api/training/stop":

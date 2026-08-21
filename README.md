@@ -174,6 +174,12 @@ The API follows the OpenAI request and response shapes for model listing, non-st
 
 Orbit does not upload local training text, checkpoints, or chat messages. Users explicitly move a remote training bundle if they choose to train on another machine.
 
+## Updates
+
+Open **Settings** and enable **Automatically update Orbit**. Orbit checks the official release channel in the background. If training is active, the update is queued and waits for the current checkpoint to be saved before restarting the local service. Releases can be applied directly from an older updater-capable version to the latest release; intermediate versions are not required.
+
+The original 0.5.0 runtime predates the updater. It needs one manual installation of a newer Orbit version before in-app updates can take over.
+
 ## Private development workspace
 
 Invited developers participate only through the private Orbit project workspace for implementation, review, and testing. The workspace address and access are provided separately by the project owner.

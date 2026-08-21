@@ -16,6 +16,7 @@ from .config import OrbitConfig
 from .community import CommunityStore
 from .conversations import ConversationStore
 from .hub import OrbitHubClient
+from .settings import OrbitSettings
 from .resources import memory_is_critical, require_checkpoint_load_capacity, require_training_capacity, resource_snapshot
 from .teacher import TeacherConfig, generate_dataset
 from .training_config import TrainingConfig
@@ -48,6 +49,7 @@ class OrbitRuntime:
         self.community = CommunityStore(self.data_root)
         self.conversations = ConversationStore(self.data_root)
         self.hub = OrbitHubClient(self.data_root)
+        self.settings = OrbitSettings(self.data_root)
         self._hub_upload: dict[str, Any] = {"status": "idle", "progress": 0, "message": "尚未上传", "model": None}
         self._pending_training: tuple[dict[str, Any], str, dict[str, int], str] | None = None
         self._state_lock = threading.RLock()

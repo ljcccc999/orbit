@@ -21,7 +21,7 @@ def current_version() -> str:
     try:
         return metadata.version("orbit-ai")
     except metadata.PackageNotFoundError:
-        return "0.6.0"
+        return "0.6.1"
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -95,14 +95,32 @@ def schedule_install(info: UpdateInfo) -> bool:
     """Start an updater outside the service process before stopping it."""
     if not info.available or not info.tag:
         return False
-    code = (
-        "import time; time.sleep(1); "
-        "from orbit import service, updater; "
-        "service.stop(); "
-        "raise SystemExit(updater.install_latest(updater.UpdateInfo(" 
-        f"{info.current_version!r}, {info.latest_version!r}, True, "
-        f"{info.release_url!r}, {info.tag!r}, None)))"
-    )
+    code = f"""
+import json
+import time
+import urllib.request
+time.sleep(1)
+active = {{'preparing', 'generating', 'waiting_memory', 'needs_memory', 'running', 'stopping'}}
+errors = 0
+while True:
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:8765/api/training', timeout=3) as response:
+            status = json.loads(response.read()).get('status')
+        errors = 0
+        if status not in active:
+            break
+    except Exception:
+        errors += 1
+        if errors >= 12:
+            break
+    time.sleep(5)
+from orbit import service, updater
+service.stop()
+raise SystemExit(updater.install_latest(updater.UpdateInfo(
+    {info.current_version!r}, {info.latest_version!r}, True,
+    {info.release_url!r}, {info.tag!r}, None
+)))
+"""
     subprocess.Popen(
         [sys.executable, "-c", code],
         start_new_session=True,
