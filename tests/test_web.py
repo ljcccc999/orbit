@@ -88,6 +88,8 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "model:$('chatModel').value||null" in PAGE
     assert "/api/training/stop-delete" in PAGE
     assert "stopped_deleted" in PAGE
+    assert 'id="createRemoteAI"' in PAGE
+    assert "Second confirmation" in PAGE
     assert 'data-i18n="examplesHelp"' in PAGE
     assert 'id="teacherKey" type="password"' in PAGE
     assert 'data-paste-enabled="true"' in PAGE

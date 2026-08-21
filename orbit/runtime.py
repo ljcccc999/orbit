@@ -807,9 +807,22 @@ class OrbitRuntime:
         with self._state_lock:
             if self._hub_upload.get("model") == model_id and self._hub_upload.get("status") in {"hashing", "uploading"}:
                 raise RuntimeError("模型正在上传，暂时不能删除")
+            loading_id = self._loading.get("model_id")
+            load_thread = self._load_thread if loading_id == model_id else None
+            loading_process = self._model if load_thread is not None else None
+            if load_thread is not None and load_thread.is_alive():
+                self._load_cancel.set()
+                if loading_process is not None and loading_process.poll() is None:
+                    loading_process.terminate()
+        if load_thread is not None and load_thread is not threading.current_thread():
+            load_thread.join(timeout=5)
+            if load_thread.is_alive():
+                raise RuntimeError("模型仍在加载，已请求停止；请稍后再删除")
         if self.active_model_id == model_id:
             self.unload_model()
         removed = self._remove_model_files(model_id)
+        if not removed:
+            raise FileNotFoundError(f"找不到可删除的本地模型：{model_id}")
         return {"status": "deleted", "model": model_id, "removed": removed, "training_history_preserved": True}
 
     def stop_training(self, delete_checkpoint: bool = False) -> dict[str, Any]:

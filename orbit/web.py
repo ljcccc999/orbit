@@ -366,6 +366,7 @@ class Handler(BaseHTTPRequestHandler):
             training_config=train_cfg,
             model_name=str(data.get("model_name", "orbit")),
             data_language=str(data.get("data_language", "bilingual")),
+            assistant=data.get("assistant") if isinstance(data.get("assistant"), dict) else None,
         )
         job_id = zip_path.stem.removeprefix("orbit-training-")
         self._json(201, {
