@@ -26,7 +26,7 @@ from .identity import (
     identity_response,
 )
 from .settings import OrbitSettings
-from .resources import memory_is_critical, require_checkpoint_load_capacity, require_training_capacity, resource_snapshot
+from .resources import TRAINING_MEMORY_RESERVE_GB, memory_is_critical, require_checkpoint_load_capacity, require_training_capacity, resource_snapshot
 from .teacher import TeacherConfig, generate_dataset
 from .training_config import TrainingConfig
 
@@ -58,7 +58,8 @@ class OrbitRuntime:
         self.hub = OrbitHubClient(self.data_root)
         self.settings = OrbitSettings(self.data_root)
         self._hub_upload: dict[str, Any] = {"status": "idle", "progress": 0, "message": "尚未上传", "model": None}
-        self._pending_training: tuple[dict[str, Any], str, dict[str, int], str] | None = None
+        self._pending_training: tuple[dict[str, Any], str, dict[str, Any], str] | None = None
+        self._memory_resume_thread: threading.Thread | None = None
         self._state_lock = threading.RLock()
         self._model_lock = threading.RLock()
         self._stop_event = threading.Event()
@@ -311,7 +312,7 @@ class OrbitRuntime:
                 "training_memory_gb": round(cfg.estimated_training_memory_gb(), 1),
                 "system_memory_gb": snapshot["memory_total_gb"],
                 "available_memory_gb": snapshot["memory_available_gb"],
-                "can_train_here": cfg.estimated_training_memory_gb() <= max(0, snapshot["memory_available_gb"] - 2),
+                "can_train_here": cfg.estimated_training_memory_gb() <= max(0, snapshot["memory_available_gb"] - TRAINING_MEMORY_RESERVE_GB),
             })
         return rows
 
@@ -329,7 +330,7 @@ class OrbitRuntime:
         resources = resource_snapshot(self.data_root)
         available = float(resources.get("memory_available_gb", 0) or 0)
         required = model.estimated_training_memory_gb()
-        safe_budget = max(0.0, available - 2.0)
+        safe_budget = max(0.0, available - TRAINING_MEMORY_RESERVE_GB)
         feasible = required <= safe_budget
         pressure = required / safe_budget if safe_budget else float("inf")
         seq_len = base.seq_len
@@ -423,6 +424,23 @@ class OrbitRuntime:
                 **metadata,
             })
         return rows
+
+    def check_model_name(self, name: str) -> dict[str, Any]:
+        """Check a custom model name without creating files or changing state."""
+        raw = str(name or "").strip()
+        if not raw:
+            return {"valid": True, "duplicate": False, "name": "", "message": ""}
+        try:
+            normalized = self._safe_model_name(raw, raw)
+        except ValueError as exc:
+            return {"valid": False, "duplicate": False, "name": raw, "message": str(exc)}
+        duplicate = any((self.models_root / f"{normalized}{suffix}").is_file() for suffix in (".pt", ".json"))
+        return {
+            "valid": not duplicate,
+            "duplicate": duplicate,
+            "name": normalized,
+            "message": (f"模型名称已存在：{normalized}，请换一个名称" if duplicate else "名称可用"),
+        }
 
     @staticmethod
     def _safe_model_name(value: str, fallback: str) -> str:
@@ -591,13 +609,28 @@ class OrbitRuntime:
             parent_preset = str(self._model_metadata(parent_model).get("preset", ""))
             if parent_preset and parent_preset != preset:
                 raise ValueError(f"二次训练必须保持父模型规模：请选择 {parent_preset.upper()}")
+        resume_model_id = str(payload.get("_resume_model_id", "")).strip()
+        if resume_model_id:
+            checkpoint = self._checkpoint_for(resume_model_id)
+            metadata = self._model_metadata(resume_model_id)
+            display_name = str(metadata.get("display_name") or metadata.get("name") or resume_model_id)
+            return preset, train_cfg, checkpoint, resume_model_id, display_name, parent_model
         fallback = f"orbit-{preset}-{stamp}"
-        display_name = self._safe_model_name(str(payload.get("model_name", "")), fallback)
+        requested_name = str(payload.get("model_name", "")).strip()
+        display_name = self._safe_model_name(requested_name, fallback)
         model_id = display_name
         checkpoint = self.models_root / f"{model_id}.pt"
-        if checkpoint.exists():
-            model_id = f"{model_id}-{stamp}"
-            checkpoint = self.models_root / f"{model_id}.pt"
+        metadata_path = self._metadata_path(model_id)
+        if checkpoint.exists() or metadata_path.exists():
+            if requested_name:
+                raise ValueError(f"模型名称已存在：{display_name}，请换一个名称")
+            suffix = 2
+            while checkpoint.exists() or metadata_path.exists():
+                model_id = f"{display_name}-{suffix}"
+                checkpoint = self.models_root / f"{model_id}.pt"
+                metadata_path = self._metadata_path(model_id)
+                suffix += 1
+            display_name = model_id
         return preset, train_cfg, checkpoint, model_id, display_name, parent_model
 
     def _run_local_training(self, payload: dict[str, Any], text: str) -> None:
@@ -613,9 +646,21 @@ class OrbitRuntime:
         training_dataset = self.datasets_root / f"training-corpus-{stamp}-{secrets.token_hex(3)}.txt"
         training_text = text if ORBIT_TRAINING_ANCHOR in text else f"{ORBIT_TRAINING_ANCHOR}\n\n{text}\n\n{ORBIT_TRAINING_ANCHOR}\n"
         training_dataset.write_text(training_text, encoding="utf-8")
-        run_id = f"{stamp}-{secrets.token_hex(3)}"
+        resume_run_id = str(payload.get("_resume_run_id", "")).strip()
+        run_id = resume_run_id or f"{stamp}-{secrets.token_hex(3)}"
         cfg = OrbitConfig.for_preset(preset)
+        existing_run: dict[str, Any] = {}
+        if resume_run_id:
+            run_path = self.training_runs_root / resume_run_id / "run.json"
+            if run_path.is_file():
+                try:
+                    loaded = json.loads(run_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        existing_run = loaded
+                except (OSError, json.JSONDecodeError):
+                    pass
         run = {
+            **existing_run,
             "id": run_id, "status": "running", "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "completed_at": None, "model_id": model_id, "model_name": display_name,
             "preset": preset, "parameters": cfg.estimate_parameters(), "parent_model": parent_model,
@@ -623,7 +668,8 @@ class OrbitRuntime:
             "identity_training_injected": True,
             "dataset": str(dataset), "training_dataset": str(training_dataset),
             "training_config": train_cfg.__dict__, "device": requested_device,
-            "step": 0, "steps": train_cfg.steps, "loss": None, "message": "正在启动训练",
+            "step": int(existing_run.get("step", 0) or 0), "steps": train_cfg.steps,
+            "loss": existing_run.get("loss"), "message": "正在继续训练" if resume_run_id else "正在启动训练",
             "data_language": self._data_language(payload),
         }
         self._save_run(run)
@@ -639,16 +685,21 @@ class OrbitRuntime:
             parent_metadata = self._model_metadata(parent_model)
             metadata["training_runs"] = [*parent_metadata.get("training_runs", []), run_id]
         job_path = self.datasets_root / f"training-job-{stamp}.json"
+        resume_checkpoint = str(payload.get("_resume_checkpoint", "")).strip()
+        if not resume_checkpoint and parent_model:
+            resume_checkpoint = str(self._checkpoint_for(parent_model))
         job_path.write_text(json.dumps({
             "preset": preset, "device": requested_device, "checkpoint": str(checkpoint),
             "dataset": str(training_dataset), "training_config": train_cfg.__dict__,
-            "resume": str(self._checkpoint_for(parent_model)) if parent_model else None,
+            "resume": resume_checkpoint or None,
+            "resume_weights_only": bool(parent_model and not resume_checkpoint),
             "metadata": metadata,
         }, ensure_ascii=False), encoding="utf-8")
         with self._state_lock:
             self._training.update(
-                status="running", step=0, steps=train_cfg.steps, loss=None,
-                message=f"正在启动隔离训练进程：{preset}", model_id=model_id, model_name=display_name,
+                status="running", step=int(existing_run.get("step", 0) or 0), steps=train_cfg.steps,
+                loss=existing_run.get("loss"),
+                message=(f"正在继续隔离训练进程：{preset}" if resume_run_id else f"正在启动隔离训练进程：{preset}"), model_id=model_id, model_name=display_name,
                 checkpoint=str(checkpoint), device=requested_device, phase="training",
                 dataset=str(dataset), run_id=run_id, parent_model=parent_model,
                 _started_monotonic=time.monotonic(),
@@ -664,9 +715,13 @@ class OrbitRuntime:
         log_handle.close()
         self._training_process = process
 
+        memory_stop = False
+
         def guard() -> None:
+            nonlocal memory_stop
             while process.poll() is None:
                 if memory_is_critical() and not self._stop_event.is_set():
+                    memory_stop = True
                     self._stop_reason = "内存已接近安全下限，Orbit 已自动停止并保存 checkpoint"
                     self._stop_event.set()
                 if self._stop_event.wait(1):
@@ -719,11 +774,12 @@ class OrbitRuntime:
                     status="stopped" if stopped else "completed",
                     message=(self._stop_reason or "训练已停止，已原子保存当前 checkpoint") if stopped else "训练完成，模型已保存在本机",
                 )
+            waiting_for_memory = stopped and memory_stop and not self._delete_after_stop
             run.update(
-                status="stopped_deleted" if stopped and self._delete_after_stop else ("stopped" if stopped else "completed"),
+                status="stopped_deleted" if stopped and self._delete_after_stop else ("waiting_memory" if waiting_for_memory else ("stopped" if stopped else "completed")),
                 completed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 step=int(self._training.get("step", 0)), loss=self._training.get("loss"),
-                message=("训练已停止，未完成模型已删除" if stopped and self._delete_after_stop else self._training.get("message")),
+                message=("训练已暂停，内存恢复到安全水平后会自动继续" if waiting_for_memory else ("训练已停止，未完成模型已删除" if stopped and self._delete_after_stop else self._training.get("message"))),
             )
             if stopped and self._delete_after_stop:
                 self._remove_model_files(model_id)
@@ -732,6 +788,18 @@ class OrbitRuntime:
             self._save_run(run)
             if not (stopped and self._delete_after_stop):
                 self._write_model_metadata(model_id, metadata)
+            if waiting_for_memory:
+                resume_payload = dict(payload)
+                resume_payload["_resume_model_id"] = model_id
+                resume_payload["_resume_checkpoint"] = str(checkpoint)
+                resume_payload["_resume_run_id"] = run_id
+                with self._state_lock:
+                    self._pending_training = (resume_payload, text, {}, str(dataset))
+                    self._training.update(
+                        status="waiting_memory",
+                        message=f"训练已暂停，保留 {TRAINING_MEMORY_RESERVE_GB:.0f}GB 安全内存后会自动继续",
+                    )
+                self._start_memory_resume_monitor()
         except Exception as exc:
             run.update(status="failed", completed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"), message=str(exc))
             self._save_run(run)
@@ -817,13 +885,14 @@ class OrbitRuntime:
                 preset = str(payload.get("preset", "300m")).lower()
                 required = OrbitConfig.for_preset(preset).estimated_training_memory_gb()
                 available = float(resource_snapshot(self.data_root).get("memory_available_gb", 0) or 0)
-                if required > max(0.0, available - 2.0):
+                if required > max(0.0, available - TRAINING_MEMORY_RESERVE_GB):
                     with self._state_lock:
                         self._pending_training = (dict(payload), text, usage, str(dataset))
                         self._training.update(
                             status="needs_memory",
-                            message=f"内存不足，训练没有卡住：样本已保存。训练需要约 {required:.1f}GB，当前可用 {available:.1f}GB；释放内存后点击“重新检测并训练”",
+                            message=f"内存不足，训练没有卡住：样本已保存。训练需要约 {required:.1f}GB，当前可用 {available:.1f}GB；至少保留 {TRAINING_MEMORY_RESERVE_GB:.0f}GB 后会自动继续",
                         )
+                    self._start_memory_resume_monitor()
                     return
                 with self._state_lock:
                     self._training.update(status="preparing", message="内存已满足要求，正在启动本机训练")
@@ -850,8 +919,8 @@ class OrbitRuntime:
             preset = str(payload.get("preset", "300m")).lower()
             required = OrbitConfig.for_preset(preset).estimated_training_memory_gb()
             available = float(resource_snapshot(self.data_root).get("memory_available_gb", 0) or 0)
-            if required > max(0.0, available - 2.0):
-                raise RuntimeError(f"内存仍不足：训练约需 {required:.1f}GB，当前可用 {available:.1f}GB，并需保留 2GB 给系统")
+            if required > max(0.0, available - TRAINING_MEMORY_RESERVE_GB):
+                raise RuntimeError(f"内存仍不足：训练约需 {required:.1f}GB，当前可用 {available:.1f}GB，并需保留 {TRAINING_MEMORY_RESERVE_GB:.0f}GB 给系统")
             self._assert_idle()
             self._pending_training = None
             self._stop_event.clear()
@@ -867,6 +936,86 @@ class OrbitRuntime:
                     self._training.update(status="failed", message=str(exc))
 
         self._work_thread = threading.Thread(target=worker, name="orbit-resumed-training", daemon=True)
+        self._work_thread.start()
+        return self.training_state()
+
+    def _start_memory_resume_monitor(self) -> None:
+        with self._state_lock:
+            if self._memory_resume_thread and self._memory_resume_thread.is_alive():
+                return
+            self._memory_resume_thread = threading.Thread(
+                target=self._memory_resume_loop, name="orbit-memory-resume", daemon=True,
+            )
+            self._memory_resume_thread.start()
+
+    def _memory_resume_loop(self) -> None:
+        while True:
+            with self._state_lock:
+                pending = self._pending_training
+                worker = self._work_thread
+                status = str(self._training.get("status", ""))
+            if not pending or status not in {"waiting_memory", "needs_memory"}:
+                return
+            if worker and worker.is_alive():
+                time.sleep(1)
+                continue
+            payload, _text, _usage, _dataset = pending
+            try:
+                preset = str(payload.get("preset", "300m")).lower()
+                required = OrbitConfig.for_preset(preset).estimated_training_memory_gb()
+                available = float(resource_snapshot(self.data_root).get("memory_available_gb", 0) or 0)
+                if required <= max(0.0, available - TRAINING_MEMORY_RESERVE_GB):
+                    self.resume_pending_training()
+                    return
+            except Exception as exc:
+                with self._state_lock:
+                    self._training.update(status="failed", message=str(exc))
+                return
+            time.sleep(3)
+
+    def continue_training(self, run_id: str | None = None) -> dict[str, Any]:
+        """Resume the interrupted run from its existing checkpoint."""
+        with self._state_lock:
+            self._assert_idle()
+            state = dict(self._training)
+        selected_id = str(run_id or state.get("run_id") or "").strip()
+        if not selected_id or Path(selected_id).name != selected_id:
+            raise ValueError("找不到可继续的训练记录")
+        run_path = self.training_runs_root / selected_id / "run.json"
+        if not run_path.is_file():
+            raise FileNotFoundError("找不到训练记录")
+        run = json.loads(run_path.read_text(encoding="utf-8"))
+        model_id = str(run.get("model_id") or state.get("model_id") or "").strip()
+        checkpoint = self._checkpoint_for(model_id)
+        dataset = Path(str(run.get("dataset", "")))
+        if not dataset.is_file():
+            raise FileNotFoundError("找不到这次训练保存的内容")
+        config = dict(run.get("training_config") or {})
+        payload: dict[str, Any] = {
+            "model_name": str(run.get("model_name") or model_id),
+            "preset": str(run.get("preset", "300m")),
+            "base_model": "", "device": str(run.get("device", "auto")),
+            "data_language": str(run.get("data_language", "bilingual")),
+            "_dataset_path": str(dataset), "_resume_model_id": model_id,
+            "_resume_checkpoint": str(checkpoint), "_resume_run_id": selected_id,
+            **config,
+        }
+        text = dataset.read_text(encoding="utf-8")
+        with self._state_lock:
+            self._pending_training = None
+            self._stop_event.clear()
+            self._stop_reason = ""
+            self._delete_after_stop = False
+            self._training.update(status="preparing", message="正在从 checkpoint 继续训练")
+
+        def worker() -> None:
+            try:
+                self._run_local_training(payload, text)
+            except Exception as exc:
+                with self._state_lock:
+                    self._training.update(status="failed", message=str(exc))
+
+        self._work_thread = threading.Thread(target=worker, name="orbit-continue-training", daemon=True)
         self._work_thread.start()
         return self.training_state()
 
@@ -1034,7 +1183,7 @@ class OrbitRuntime:
         status = str(state.get("status", ""))
         model_id = str(state.get("model_id") or "").strip()
         run_id = str(state.get("run_id") or "").strip()
-        if status not in {"stopped", "failed", "stopping"}:
+        if status not in {"stopped", "failed", "stopping", "waiting_memory", "needs_memory"}:
             raise RuntimeError("只能删除已经停止的训练模型")
         if not model_id:
             raise RuntimeError("这次训练没有生成可删除的模型文件")
@@ -1067,6 +1216,7 @@ class OrbitRuntime:
                     pass
 
         with self._state_lock:
+            self._pending_training = None
             self._training.update(status="stopped_deleted", message="训练已停止，未完成模型已删除", checkpoint="")
         return {
             "status": "stopped_deleted",
@@ -1079,7 +1229,7 @@ class OrbitRuntime:
         with self._state_lock:
             running = bool(self._work_thread and self._work_thread.is_alive())
             current_status = str(self._training.get("status", ""))
-        if delete_checkpoint and not running and current_status in {"stopped", "failed", "stopping"}:
+        if delete_checkpoint and not running and current_status in {"stopped", "failed", "stopping", "waiting_memory", "needs_memory"}:
             return {**self.training_state(), **self._delete_stopped_training_model()}
         if not delete_checkpoint and not running and current_status == "stopping":
             return self.training_state()

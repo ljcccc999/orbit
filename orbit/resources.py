@@ -8,6 +8,7 @@ import psutil
 
 
 GB = 1_000_000_000
+TRAINING_MEMORY_RESERVE_GB = 1.0
 
 
 def resource_snapshot(path: Path) -> dict[str, Any]:
@@ -24,7 +25,9 @@ def resource_snapshot(path: Path) -> dict[str, Any]:
 
 def require_training_capacity(required_memory_gb: float, parameter_count: int, path: Path) -> dict[str, Any]:
     snapshot = resource_snapshot(path)
-    memory_reserve = max(2.0, snapshot["memory_total_gb"] * 0.08)
+    # This is the free-memory floor for the OS and Orbit. Model training
+    # memory is checked separately above this reserve.
+    memory_reserve = TRAINING_MEMORY_RESERVE_GB
     usable_memory = max(0.0, snapshot["memory_available_gb"] - memory_reserve)
     if required_memory_gb > usable_memory:
         raise MemoryError(
@@ -66,5 +69,5 @@ def require_checkpoint_load_capacity(checkpoint_size: int, path: Path) -> dict[s
 
 def memory_is_critical() -> bool:
     memory = psutil.virtual_memory()
-    reserve = max(GB, int(memory.total * 0.05))
+    reserve = int(TRAINING_MEMORY_RESERVE_GB * GB)
     return memory.available < reserve

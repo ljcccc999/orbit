@@ -156,6 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {
                     "local": True,
                     "minimum_memory_gb": 10,
+                    "training_memory_reserve_gb": 1,
                     "data_root": str(runtime.data_root),
                     "presets": runtime.preset_rows(),
                     "training": runtime.training_state(),
@@ -237,6 +238,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(202, self.server.runtime.start_auto_training(data))
             elif path == "/api/training/recommendation":
                 self._json(200, self.server.runtime.training_recommendation(data))
+            elif path == "/api/models/name-check":
+                self._json(200, self.server.runtime.check_model_name(str(data.get("name", ""))))
             elif path == "/api/teacher/settings":
                 self._json(200, self.server.runtime.save_teacher_profile(
                     str(data.get("provider", "")), str(data.get("base_url", "")),
@@ -308,6 +311,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(202, self.server.runtime.stop_training(delete_checkpoint=True))
             elif path == "/api/training/resume":
                 self._json(202, self.server.runtime.resume_pending_training())
+            elif path == "/api/training/continue":
+                self._json(202, self.server.runtime.continue_training(str(data.get("run_id", "")).strip() or None))
             elif path == "/api/training/runs/delete":
                 self._json(200, self.server.runtime.delete_training_run(str(data.get("id", ""))))
             elif path == "/api/models/load":
