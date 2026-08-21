@@ -108,6 +108,10 @@ PAGE = PAGE.replace(
 PAGE = PAGE.replace("$('stopTraining').onclick=async()=>{", "$('stopDeleteTraining').onclick=async()=>{const s=system?.training||{};const stopped=['stopped','failed'].includes(s.status)&&Boolean(s.model_id);if(!confirm(stopped?(currentLang==='zh'?'删除已停止模型？训练记录会保留。':'Delete the stopped model? Training history will remain.'):(currentLang==='zh'?'停止训练并删除未完成模型？训练记录会保留。':'Stop training and delete the unfinished model? Training history will remain.')))return;try{await request('/api/training/stop-delete',{method:'POST',body:'{}'});await refreshSystem();startPolling()}catch(e){toast(e.message)}};$('stopTraining').onclick=async()=>{")
 PAGE = PAGE.replace("updateInstalling:'正在更新 Orbit，本机服务即将重启。'", "updateInstalling:'训练完成后更新 Orbit，本机服务会安全重启。',updateQueued:'更新已排队。Orbit 会等待训练完成并保存 checkpoint 后再安全更新。'")
 PAGE = PAGE.replace(
+    "if(start)start.disabled=Boolean(row&&!row.can_train_here);updateEstimate()}function setTrainingActionState",
+    "if(start)start.disabled=Boolean(row&&!row.can_train_here);updateEstimate();scheduleRecommendation()}function setTrainingActionState",
+)
+PAGE = PAGE.replace(
     '<div class="toolbar-right"><span class="chip" id="memoryChip">— GB RAM</span><span class="chip" id="modelChip" data-i18n="idle">Idle</span></div>',
     '<div class="toolbar-right"><button class="orbit-status-button" id="orbitStatusButton" title="Orbit local API"><img src="/static/orbit-logo-transparent.png" alt="Orbit"><span id="orbitStatusLabel">Orbit</span></button><span class="chip" id="memoryChip">— GB RAM</span><span class="chip" id="modelChip" data-i18n="idle">Idle</span></div>',
 )
