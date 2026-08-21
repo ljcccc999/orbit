@@ -40,11 +40,20 @@ def _download_environment() -> dict[str, str]:
     return env
 
 
+def _urlopen(request: urllib.request.Request, timeout: float):
+    env = _download_environment()
+    proxy = env.get("HTTPS_PROXY") or env.get("https_proxy") or env.get("ALL_PROXY") or env.get("all_proxy")
+    if not proxy:
+        return urllib.request.urlopen(request, timeout=timeout)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return opener.open(request, timeout=timeout)
+
+
 def current_version() -> str:
     try:
         return metadata.version("orbit-ai")
     except metadata.PackageNotFoundError:
-        return "0.6.5"
+        return "0.6.6"
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -73,7 +82,7 @@ def check() -> UpdateInfo:
     )
     version = current_version()
     try:
-        with urllib.request.urlopen(request, timeout=8) as response:
+        with _urlopen(request, timeout=8) as response:
             payload = json.loads(response.read())
         tag = str(payload.get("tag_name", ""))
         latest = tag.lstrip("vV")
@@ -93,7 +102,7 @@ def check() -> UpdateInfo:
 def _download_script(name: str, tag: str) -> Path:
     url = f"https://raw.githubusercontent.com/{REPOSITORY}/{tag}/{name}"
     request = urllib.request.Request(url, headers={"User-Agent": "Orbit-Updater"})
-    with urllib.request.urlopen(request, timeout=20) as response:
+    with _urlopen(request, timeout=20) as response:
         content = response.read()
     folder = Path(tempfile.mkdtemp(prefix="orbit-update-"))
     path = folder / name
