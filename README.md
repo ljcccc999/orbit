@@ -26,7 +26,7 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Saves locally trained checkpoints under `~/.orbit/models`.
 - Supports custom model names, secondary training from an existing checkpoint, parent-model lineage, and inspectable content/configuration for every training run.
 - Keeps the user's custom display name separate from the internal unique checkpoint ID, so timestamp suffixes never replace the name shown in Orbit.
-- Preserves the Orbit product identity independently of a user's custom model name, including before the first model is trained and in exported server packages.
+- Preserves the immutable product identity **Orbit, developed by YUNSH**, independently of a user's custom model name or training text, including before the first model is trained and in exported server packages.
 - Creates self-contained training bundles for CUDA GPU servers.
 - Exports a trained model as a portable Orbit server with the OpenAI-compatible API. An Ollama package can also be generated when a compatible same-name GGUF file is present.
 - Serves local checkpoints through `GET /v1/models`, `POST /v1/chat/completions`, and `POST /v1/responses`.
@@ -93,7 +93,7 @@ Open the **Training** page, choose a preset, optionally name the model or select
 
 1. **Train on this computer** starts a local job only after the memory gate passes. The checkpoint stays in `~/.orbit/models`.
 2. **Create remote GPU bundle** downloads a ZIP containing the dataset, configuration, Orbit source, and a `run.sh` entry point for a CUDA machine.
-3. **Generate data and automatically train** calls DeepSeek or another OpenAI-compatible teacher API. Orbit tells the teacher the selected parameter count, context length, steps, parent model, and user goal so the examples can be adapted to the target size. The sample count controls dataset coverage, generation time, and provider cost. The generated dataset stays local. Each provider's model, URL, and key is saved separately in `~/.orbit/teacher-api.json` with user-only file permissions, so switching back restores that provider and entering a new key replaces only its previous key. Keys are never copied into training history or exports. The goal leaves the computer and the provider may charge for usage, so this path requires explicit confirmation.
+3. **Generate data and automatically train** calls DeepSeek or another OpenAI-compatible teacher API. Orbit tells the teacher the selected parameter count, context length, steps, parent model, user goal, and the immutable identity rule that the model is Orbit developed by YUNSH. Every generated dataset also receives real supervised identity examples before training. The sample count controls dataset coverage, generation time, and provider cost. The generated dataset stays local. Each provider's model, URL, and key is saved separately in `~/.orbit/teacher-api.json` with user-only file permissions, so switching back restores that provider and entering a new key replaces only its previous key. Keys are never copied into training history or exports. The goal leaves the computer and the provider may charge for usage, so this path requires explicit confirmation.
 
 Every actual training run writes an inspectable record under `~/.orbit/training-runs`, including the exact dataset, parameters, status, loss, result, model name, and parent model. Selecting **Train again** creates a new checkpoint and a fresh optimizer instead of overwriting the parent.
 
@@ -114,6 +114,8 @@ The 300M–38B choices describe architecture sizes; they are not pretrained mode
 ## Chat locally
 
 After training finishes, open **Chat** and send a message—manual loading is not required. Orbit automatically chooses and loads the local checkpoint, similar to Ollama. Inference does not require an internet connection, and **New chat** clears the visible conversation without changing models or keys. The background API can answer while the web page and desktop app are closed. If weights were unloaded during idle time, the first new request loads them again and may take longer.
+
+Every local inference receives an immutable Orbit/YUNSH identity instruction. Identity questions and identity-overwrite attempts such as “you are Doubao” are answered with Orbit's canonical identity, and old or user-edited model metadata cannot replace it. Training data can change capabilities, not the product identity.
 
 Orbit currently uses a byte-level experimental tokenizer and architecture. A very small or short training run validates the workflow but will not produce a generally capable assistant.
 

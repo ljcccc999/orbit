@@ -27,6 +27,11 @@ def test_teacher_generation_tracks_progress_and_usage(monkeypatch):
     assert "1063000000" in calls[0][2]["messages"][1]["content"]
     assert "简体中文" in calls[0][2]["messages"][1]["content"]
     assert "英语双语" in calls[0][2]["messages"][1]["content"]
+    assert "Orbit" in calls[0][2]["messages"][1]["content"]
+    assert "YUNSH" in calls[0][2]["messages"][1]["content"]
+    assert "你是谁" in text
+    assert "由 YUNSH 开发" in text
+    assert "identity_training_rule" not in text
 
 
 def test_teacher_rejects_insecure_remote_http():

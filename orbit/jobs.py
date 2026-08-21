@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 from .config import OrbitConfig
+from .identity import ORBIT_SYSTEM_PROMPT, ORBIT_TRAINING_ANCHOR
 from .training_config import TrainingConfig
 
 
@@ -40,6 +41,9 @@ def create_job_bundle(
         "model_parameters": cfg.estimate_parameters(),
         "model_name": model_name,
         "identity": "Orbit",
+        "developer": "YUNSH",
+        "system_prompt": ORBIT_SYSTEM_PROMPT,
+        "identity_training_examples": ORBIT_TRAINING_ANCHOR,
         "data_language": data_language,
         "training": train_cfg.__dict__,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),

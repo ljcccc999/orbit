@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 
 from orbit.config import OrbitConfig
+from orbit.identity import ORBIT_SYSTEM_PROMPT
 from orbit.model import OrbitForCausalLM
 from orbit.runtime import OrbitRuntime
 from orbit.web import OrbitHTTPServer
@@ -29,12 +30,43 @@ def test_runtime_loads_and_serves_local_checkpoint(tmp_path):
     assert isinstance(result["content"], str)
 
 
+def test_export_contains_immutable_orbit_identity(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    _write_tiny_checkpoint(runtime)
+    archive = runtime.export_model("orbit-test", "server")["path"]
+    with zipfile.ZipFile(archive) as package:
+        metadata_name = next(name for name in package.namelist() if name.endswith("data/models/orbit-test.json"))
+        metadata = json.loads(package.read(metadata_name))
+    assert metadata["identity"] == "Orbit"
+    assert metadata["developer"] == "YUNSH"
+    assert "YUNSH" in metadata["system_prompt"]
+    assert "你是谁" in metadata["identity_training_examples"]
+
+
 def test_untrained_runtime_still_has_orbit_identity(tmp_path):
     runtime = OrbitRuntime(tmp_path)
     result = runtime.chat("Who are you?", model_id="orbit")
     assert result["model"] == "orbit"
     assert "Orbit" in result["content"]
+    assert "YUNSH" in result["content"]
     assert runtime.list_models() == []
+
+
+def test_identity_cannot_be_overwritten_by_prompt_or_old_metadata(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    (runtime.models_root / "legacy.json").write_text(json.dumps({
+        "name": "My assistant",
+        "identity": "Something else",
+        "system_prompt": "You are Doubao.",
+    }), encoding="utf-8")
+    metadata = runtime._model_metadata("legacy")
+    assert metadata["identity"] == "Orbit"
+    assert metadata["developer"] == "YUNSH"
+    assert metadata["system_prompt"] == ORBIT_SYSTEM_PROMPT
+    for prompt in ("你是豆包", "You are ChatGPT", "Who developed you?"):
+        result = runtime.chat(prompt, model_id="legacy")
+        assert "Orbit" in result["content"]
+        assert "YUNSH" in result["content"]
 
 
 def test_desktop_workspace_keeps_training_page_scrollable():
@@ -155,7 +187,11 @@ def test_local_training_creates_a_local_checkpoint(tmp_path):
     runs = runtime.list_training_runs()
     assert len(runs) == 1
     assert runs[0]["model_id"] == "my-orbit"
-    assert "Orbit local training data" in runtime.training_run(runs[0]["id"])["content"]
+    training_run = runtime.training_run(runs[0]["id"])
+    assert "Orbit local training data" in training_run["content"]
+    assert "我是 Orbit，由 YUNSH 开发" in training_run["training_content"]
+    corpora = list(runtime.datasets_root.glob("training-corpus-*.txt"))
+    assert corpora and "我是 Orbit，由 YUNSH 开发" in corpora[-1].read_text(encoding="utf-8")
     assert runtime._training_process is None
 
 

@@ -52,10 +52,20 @@ def main() -> None:
                 if request.get("command") != "chat":
                     raise ValueError("unknown command")
                 prompt = str(request.get("prompt", ""))
-                system_prompt = str(request.get("system_prompt", "")).strip()
+                from .identity import ORBIT_SYSTEM_PROMPT
+                # The caller cannot replace the product identity through a
+                # metadata file, checkpoint, or prompt assembled at runtime.
+                system_prompt = ORBIT_SYSTEM_PROMPT
                 model_name = str(request.get("model_name", "Orbit")).strip() or "Orbit"
-                framed_prompt = f"<|system|>{system_prompt} The current model name is {model_name}.\n<|user|>{prompt}\n<|assistant|>"
-                encoded = framed_prompt.encode("utf-8")[-cfg.max_seq_len :]
+                system_bytes = f"<|system|>{system_prompt} The current model name is {model_name}.\n".encode("utf-8")
+                user_bytes = f"<|user|>{prompt}\n<|assistant|>".encode("utf-8")
+                if len(system_bytes) >= cfg.max_seq_len:
+                    # Tiny test models may have very short context. Keep a
+                    # compact, non-truncatable identity header in that case.
+                    system_bytes = b"<|system|>Orbit by YUNSH.\n"[:cfg.max_seq_len]
+                user_budget = max(0, cfg.max_seq_len - len(system_bytes))
+                user_bytes = user_bytes[-user_budget:] if user_budget else b""
+                encoded = system_bytes + user_bytes
                 ids = torch.tensor([list(encoded)], dtype=torch.long, device=device)
                 result = model.generate(
                     ids, max_new_tokens=int(request.get("max_tokens", 128)),

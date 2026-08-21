@@ -12,6 +12,7 @@ from typing import Callable, Optional
 import torch
 
 from .config import OrbitConfig
+from .identity import ORBIT_SYSTEM_PROMPT, ORBIT_TRAINING_ANCHOR
 from .model import OrbitForCausalLM
 from .training_config import TrainingConfig
 
@@ -116,6 +117,8 @@ def run_training(
             scheduler.load_state_dict(state["scheduler"])
         start_step = 0 if resume_weights_only else int(state.get("step", 0))
     corpus = text or ("Orbit learns patterns from examples. Train small, test often, and share useful models. " * 200)
+    if ORBIT_TRAINING_ANCHOR not in corpus:
+        corpus = f"{ORBIT_TRAINING_ANCHOR}\n\n{corpus}\n\n{ORBIT_TRAINING_ANCHOR}"
     model.train()
     for step in range(start_step + 1, train_cfg.steps + 1):
         if stop_event is not None and stop_event.is_set():
@@ -172,8 +175,9 @@ def main() -> None:
         grad_clip=args.grad_clip, precision=args.precision, scheduler_name=args.scheduler,
         checkpoint_every=args.checkpoint_every, seed=args.seed, resume=args.resume,
         model_metadata={
-            "name": args.model_name, "identity": "Orbit",
-            "system_prompt": "You are Orbit, a local AI created and trained by the user.",
+            "name": args.model_name, "identity": "Orbit", "developer": "YUNSH",
+            "system_prompt": ORBIT_SYSTEM_PROMPT,
+            "identity_training_examples": ORBIT_TRAINING_ANCHOR,
             "architecture": "orbit-hybrid-moe-v1",
         },
     )

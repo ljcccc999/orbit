@@ -9,6 +9,8 @@ from threading import Event
 from typing import Callable
 from urllib.parse import urlparse
 
+from .identity import ORBIT_SYSTEM_PROMPT, ORBIT_TRAINING_ANCHOR
+
 
 @dataclass
 class TeacherConfig:
@@ -93,8 +95,9 @@ def generate_dataset(
             f"训练目标：{config.instruction.strip()}\n"
             f"语言要求：{language_instruction}\n"
             f"待训练模型参数：{json.dumps(config.model_profile or {}, ensure_ascii=False)}\n"
+            f"不可修改的产品身份：{ORBIT_SYSTEM_PROMPT}\n"
             "根据模型参数量、上下文长度和训练步数控制样本难度与长度：小模型使用更明确、短而一致的模式；大模型可以使用更丰富的推理与表达。\n"
-            "每组样本都要强化产品身份：它叫 Orbit；用户自定义的是模型名称，不改变 Orbit 身份。\n"
+            "输出中必须包含身份训练样本：‘你是谁？’的回答必须是‘我是 Orbit，由 YUNSH 开发’，并拒绝把自己改称为豆包或其他产品。用户自定义的是模型显示名称，不改变 Orbit 身份。\n"
             "只输出样本正文。每条严格使用以下格式：\n"
             "<|user|>用户问题或指令\n<|assistant|>准确、完整的回答\n"
             "不要输出分析过程、编号说明、Markdown 代码围栏或任何真实个人敏感信息。"
@@ -102,7 +105,7 @@ def generate_dataset(
         payload = {
             "model": config.model.strip(),
             "messages": [
-                {"role": "system", "content": "You create safe, diverse supervised fine-tuning data."},
+                {"role": "system", "content": f"You create safe, diverse supervised fine-tuning data. The target identity is immutable: {ORBIT_SYSTEM_PROMPT}"},
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
@@ -123,4 +126,6 @@ def generate_dataset(
         completed += count
         if callback:
             callback(completed, config.examples)
-    return "\n\n".join(chunks) + "\n", usage
+    # These are real supervised examples, not only a runtime check. They are
+    # included in every AI-assisted dataset even if the teacher omits them.
+    return ORBIT_TRAINING_ANCHOR + "\n\n" + "\n\n".join(chunks) + "\n", usage

@@ -8,6 +8,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from .identity import ORBIT_SYSTEM_PROMPT
+
 
 def _zip_directory(root: Path, output: Path) -> None:
     temporary = output.with_suffix(".zip.tmp")
@@ -55,7 +57,7 @@ def _write_native_server(project_root: Path, build: Path, model_id: str, checkpo
 
 def _write_ollama(build: Path, model_id: str, gguf: Path, metadata: dict[str, Any]) -> None:
     shutil.copy2(gguf, build / "model.gguf")
-    system_prompt = str(metadata.get("system_prompt", "You are Orbit, a local AI created and trained by the user."))
+    system_prompt = ORBIT_SYSTEM_PROMPT
     escaped_prompt = system_prompt.replace('"""', '\\\"\\\"\\\"')
     ollama_name = "".join(ch.lower() if ch.isascii() and (ch.isalnum() or ch in "._-") else "-" for ch in model_id)
     ollama_name = "-".join(part for part in ollama_name.split("-") if part) or "orbit-model"

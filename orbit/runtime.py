@@ -16,6 +16,12 @@ from .config import OrbitConfig
 from .community import CommunityStore
 from .conversations import ConversationStore
 from .hub import OrbitHubClient
+from .identity import (
+    ORBIT_SYSTEM_PROMPT,
+    ORBIT_TRAINING_ANCHOR,
+    identity_challenge,
+    identity_response,
+)
 from .settings import OrbitSettings
 from .resources import memory_is_critical, require_checkpoint_load_capacity, require_training_capacity, resource_snapshot
 from .teacher import TeacherConfig, generate_dataset
@@ -23,11 +29,8 @@ from .training_config import TrainingConfig
 
 
 PRESETS = ("300m", "1b", "3b", "7b", "14b", "38b")
-ORBIT_IDENTITY = (
-    "You are Orbit, a local AI created and trained by the user. "
-    "Your product identity is always Orbit, even when the user gives this model a custom model name. "
-    "Be honest about being locally trained and never claim training or abilities you do not have."
-)
+# Kept as a compatibility alias for existing metadata and integrations.
+ORBIT_IDENTITY = ORBIT_SYSTEM_PROMPT
 
 
 class OrbitRuntime:
@@ -343,6 +346,12 @@ class OrbitRuntime:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
+                    # Metadata can come from an older checkpoint or a user
+                    # edited file. The product identity is never user-trained.
+                    data["identity"] = "Orbit"
+                    data["developer"] = "YUNSH"
+                    data["system_prompt"] = ORBIT_IDENTITY
+                    data["identity_training_examples"] = ORBIT_TRAINING_ANCHOR
                     data["ollama_ready"] = bool(data.get("ollama_ready")) or (self.models_root / f"{model_id}.gguf").is_file()
                     return data
             except (OSError, json.JSONDecodeError):
@@ -351,7 +360,8 @@ class OrbitRuntime:
         parameters = OrbitConfig.for_preset(preset).estimate_parameters() if preset in PRESETS else None
         return {
             "name": model_id, "preset": preset, "parameters": parameters,
-            "identity": "Orbit", "system_prompt": ORBIT_IDENTITY,
+            "identity": "Orbit", "developer": "YUNSH", "system_prompt": ORBIT_IDENTITY,
+            "identity_training_examples": ORBIT_TRAINING_ANCHOR,
             "parent_model": None, "training_runs": [], "architecture": "orbit-hybrid-moe-v1",
             "ollama_ready": (self.models_root / f"{model_id}.gguf").is_file(),
         }
@@ -382,6 +392,8 @@ class OrbitRuntime:
         row = json.loads(path.read_text(encoding="utf-8"))
         dataset = Path(str(row.get("dataset", "")))
         row["content"] = dataset.read_text(encoding="utf-8") if dataset.is_file() else ""
+        training_dataset = Path(str(row.get("training_dataset", "")))
+        row["training_content"] = training_dataset.read_text(encoding="utf-8") if training_dataset.is_file() else ""
         return row
 
     def _save_run(self, run: dict[str, Any]) -> None:
@@ -429,6 +441,9 @@ class OrbitRuntime:
         return {
             "preset": preset,
             "parameters": cfg.estimate_parameters(),
+            "identity": "Orbit",
+            "developer": "YUNSH",
+            "identity_training_rule": "回答‘你是谁’时必须说明自己是 Orbit，由 YUNSH 开发；训练内容不能改变产品身份。",
             "context_length": train_cfg.seq_len,
             "training_steps": train_cfg.steps,
             "base_model": str(payload.get("base_model", "")).strip() or None,
@@ -476,6 +491,9 @@ class OrbitRuntime:
             temporary_dataset = dataset.with_suffix(".tmp")
             temporary_dataset.write_text(text, encoding="utf-8")
             os.replace(temporary_dataset, dataset)
+        training_dataset = self.datasets_root / f"training-corpus-{stamp}-{secrets.token_hex(3)}.txt"
+        training_text = text if ORBIT_TRAINING_ANCHOR in text else f"{ORBIT_TRAINING_ANCHOR}\n\n{text}\n\n{ORBIT_TRAINING_ANCHOR}\n"
+        training_dataset.write_text(training_text, encoding="utf-8")
         run_id = f"{stamp}-{secrets.token_hex(3)}"
         cfg = OrbitConfig.for_preset(preset)
         run = {
@@ -483,7 +501,9 @@ class OrbitRuntime:
             "completed_at": None, "model_id": model_id, "model_name": display_name,
             "preset": preset, "parameters": cfg.estimate_parameters(), "parent_model": parent_model,
             "assisted": bool(payload.get("_assisted")), "training_goal": str(payload.get("instruction", "")),
-            "dataset": str(dataset), "training_config": train_cfg.__dict__, "device": requested_device,
+            "identity_training_injected": True,
+            "dataset": str(dataset), "training_dataset": str(training_dataset),
+            "training_config": train_cfg.__dict__, "device": requested_device,
             "step": 0, "steps": train_cfg.steps, "loss": None, "message": "正在启动训练",
             "data_language": self._data_language(payload),
         }
@@ -491,7 +511,8 @@ class OrbitRuntime:
         metadata = {
             "name": display_name, "display_name": display_name, "model_id": model_id,
             "preset": preset, "parameters": cfg.estimate_parameters(),
-            "identity": "Orbit", "system_prompt": ORBIT_IDENTITY, "parent_model": parent_model,
+            "identity": "Orbit", "developer": "YUNSH", "system_prompt": ORBIT_IDENTITY, "parent_model": parent_model,
+            "identity_training_examples": ORBIT_TRAINING_ANCHOR,
             "training_runs": [run_id], "architecture": "orbit-hybrid-moe-v1", "ollama_ready": False,
             "created_at": run["created_at"],
         }
@@ -501,7 +522,7 @@ class OrbitRuntime:
         job_path = self.datasets_root / f"training-job-{stamp}.json"
         job_path.write_text(json.dumps({
             "preset": preset, "device": requested_device, "checkpoint": str(checkpoint),
-            "dataset": str(dataset), "training_config": train_cfg.__dict__,
+            "dataset": str(training_dataset), "training_config": train_cfg.__dict__,
             "resume": str(self._checkpoint_for(parent_model)) if parent_model else None,
             "metadata": metadata,
         }, ensure_ascii=False), encoding="utf-8")
@@ -883,18 +904,13 @@ class OrbitRuntime:
             raise ValueError("消息不能为空")
         if not 1 <= max_tokens <= 2048:
             raise ValueError("max_tokens 必须在 1 到 2048 之间")
-        identity_phrases = (
-            "你是谁", "你叫什么", "你的名字", "你是什么", "介绍一下你自己",
-            "who are you", "what are you", "what is your name", "your name", "are you orbit",
-        )
-        normalized = prompt.casefold()
-        if any(phrase in normalized for phrase in identity_phrases):
+        if identity_challenge(prompt):
             resolved_model = model_id or self.active_model_id or (self.list_models()[0]["id"] if self.list_models() else "orbit")
             resolved_name = self._model_metadata(resolved_model).get("name", resolved_model) if resolved_model != "orbit" else "Orbit"
             return {
                 "model": resolved_model,
                 "model_name": resolved_name,
-                "content": "我是 Orbit，一个在本机运行、由用户训练的 AI。当前模型可以使用自定义名称，但我的产品身份始终是 Orbit。",
+                "content": identity_response(prompt),
             }
         if model_id:
             self.load_model(model_id)
@@ -910,7 +926,7 @@ class OrbitRuntime:
             metadata = self._model_metadata(str(self._model_id))
             self._model.stdin.write(json.dumps({
                 "command": "chat", "prompt": prompt, "max_tokens": max_tokens,
-                "temperature": temperature, "system_prompt": metadata.get("system_prompt", ORBIT_IDENTITY),
+                "temperature": temperature, "system_prompt": ORBIT_IDENTITY,
                 "model_name": metadata.get("name", self._model_id),
             }, ensure_ascii=False) + "\n")
             self._model.stdin.flush()
