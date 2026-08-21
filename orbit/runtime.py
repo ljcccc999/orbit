@@ -79,10 +79,48 @@ class OrbitRuntime:
             "status": "idle", "step": 0, "steps": 0, "loss": None,
             "message": "尚未开始训练", "model_id": None,
         }
+        self._restore_training_state()
         self._loading: dict[str, Any] = {
             "status": "idle", "progress": 0, "message": "没有正在加载的模型", "model_id": None,
         }
         threading.Thread(target=self._idle_janitor, name="orbit-model-janitor", daemon=True).start()
+
+    def _restore_training_state(self) -> None:
+        """Restore a resumable run after the local API process restarts.
+
+        The training form is intentionally reset on re-entry, but the run
+        lifecycle must remain visible so the user can continue or delete a
+        stopped run without pretending that the service is still training.
+        Live worker processes are not restored as running; only durable,
+        non-running states are safe to expose here.
+        """
+        restorable = {"stopped", "failed", "waiting_memory", "needs_memory"}
+        candidates = []
+        for path in self.training_runs_root.glob("*/run.json"):
+            try:
+                candidates.append((path.stat().st_mtime, path))
+            except OSError:
+                continue
+        for _, path in sorted(candidates, reverse=True):
+            try:
+                row = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(row, dict) or str(row.get("status", "")) not in restorable:
+                continue
+            model_id = str(row.get("model_id") or "").strip() or None
+            safe_model_id = Path(model_id).name if model_id else ""
+            checkpoint = str(self.models_root / f"{safe_model_id}.pt") if safe_model_id == model_id else ""
+            self._training.update(
+                status=str(row.get("status")), step=int(row.get("step", 0) or 0),
+                steps=int(row.get("steps", 0) or 0), loss=row.get("loss"),
+                message=str(row.get("message") or "这次训练已停止，可以继续或删除"),
+                model_id=model_id, model_name=str(row.get("model_name") or model_id or ""),
+                checkpoint=checkpoint, device=str(row.get("device") or "auto"),
+                phase="paused", dataset=str(row.get("dataset") or ""),
+                run_id=str(row.get("id") or path.parent.name),
+            )
+            return
 
     def _load_or_create_api_keys(self) -> list[dict[str, str]]:
         if self.api_keys_path.is_file():
