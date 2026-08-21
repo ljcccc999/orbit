@@ -113,3 +113,31 @@ PAGE = PAGE.replace(
     "$('createRemoteAI').onclick=()=>createRemoteBundle(true);",
     "$('createRemoteAI').onclick=()=>createRemoteBundle(true);function renderJobImportStatus(s){const box=$('jobImportStatus');if(!box)return;if(!s||s.kind!=='gpu_training_bundle'||s.status==='idle'){box.innerHTML='';return}const done=['uploaded','failed'].includes(s.status);box.innerHTML=`<div class=\"status\" style=\"margin-top:10px\"><b>${esc(s.model||'GPU training bundle')}</b><div class=\"progress\"><span style=\"width:${s.progress||0}%\"></span></div><div class=\"help\">${esc(s.message||'')} ${done?'':''}</div></div>`}function importRemotePayload(assisted){const payload=trainPayload();if(!assisted)return payload;const instruction=$('teacherInstruction').value.trim();if(!instruction)throw new Error(currentLang==='zh'?'请先填写 AI 训练目标。':'Describe the AI training goal first.');const presetRow=(system.presets||[]).find(x=>x.preset===$('preset').value)||{};return {...payload,ai_assisted:true,assistant:{provider:$('teacherProvider').value,base_url:$('teacherUrl').value,model:$('teacherModel').value,instruction,examples:+$('teacherExamples').value||20,language:$('teacherLanguage').value,model_profile:{preset:$('preset').value,parameters:presetRow.parameters||0}}}}async function importRemoteBundle(assisted){try{const hub=await request('/api/hub');if(!hub.logged_in){showPage('community');throw new Error(t('serverImportLogin'))}if(!confirm(t('serverImportConfirm')))return;const d=await request('/api/hub/job-upload',{method:'POST',body:JSON.stringify(importRemotePayload(assisted))});renderJobImportStatus(d);toast(t('serverImportStarted'));const timer=setInterval(async()=>{try{const s=await request('/api/hub/upload');renderJobImportStatus(s);if(['uploaded','failed'].includes(s.status)){clearInterval(timer);toast(s.status==='uploaded'?t('serverImportDone'):s.message||'Upload failed')}}catch(e){clearInterval(timer);toast(e.message)}},800)}catch(e){toast(e.message)}}$('importRemote').onclick=()=>importRemoteBundle(false);$('importRemoteAI').onclick=()=>importRemoteBundle(true);",
 )
+PAGE = PAGE.replace(
+    "</style>",
+    ".modal-backdrop{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:20px;background:rgba(20,27,42,.28);backdrop-filter:blur(10px)}.modal-backdrop[hidden]{display:none}.modal-card{width:min(440px,100%);padding:20px;border:1px solid rgba(255,255,255,.9);border-radius:16px;background:rgba(255,255,255,.94);box-shadow:0 22px 80px rgba(20,30,55,.24)}.modal-card h3{margin:0 0 8px;font-size:16px}.modal-card p{margin:0 0 14px;color:var(--muted);white-space:pre-wrap}.modal-card .actions{justify-content:flex-end}",
+)
+PAGE = PAGE.replace(
+    '<div class="toast" id="toast"></div>',
+    '<div class="toast" id="toast"></div><div class="modal-backdrop" id="actionModal" hidden><div class="modal-card" role="dialog" aria-modal="true"><h3 id="actionModalTitle">Orbit</h3><p id="actionModalMessage"></p><input id="actionModalInput" hidden autocomplete="off" spellcheck="false"><div class="actions" style="margin-top:16px"><button class="button ghost" id="actionModalCancel">Cancel</button><button class="button primary" id="actionModalConfirm">Confirm</button></div></div></div>',
+)
+PAGE = PAGE.replace(
+    "async function deleteModel(encoded){",
+    "function actionConfirm(message){return new Promise(resolve=>{const modal=$('actionModal'),input=$('actionModalInput'),cancel=$('actionModalCancel'),confirmButton=$('actionModalConfirm');$('actionModalTitle').textContent=currentLang==='zh'?'请确认操作':'Confirm action';$('actionModalMessage').textContent=message;input.hidden=true;input.value='';modal.hidden=false;const finish=value=>{modal.hidden=true;cancel.onclick=null;confirmButton.onclick=null;resolve(value)};cancel.onclick=()=>finish(false);confirmButton.onclick=()=>finish(true);confirmButton.focus()})}function actionPrompt(message){return new Promise(resolve=>{const modal=$('actionModal'),input=$('actionModalInput'),cancel=$('actionModalCancel'),confirmButton=$('actionModalConfirm');$('actionModalTitle').textContent=currentLang==='zh'?'输入模型名称':'Type model name';$('actionModalMessage').textContent=message;input.hidden=false;input.value='';modal.hidden=false;const finish=value=>{modal.hidden=true;cancel.onclick=null;confirmButton.onclick=null;resolve(value)};cancel.onclick=()=>finish(null);confirmButton.onclick=()=>finish(input.value.trim());input.focus()})}async function deleteModel(encoded){",
+)
+PAGE = PAGE.replace(
+    "if(!confirm((currentLang==='zh'?'确定要删除模型 '",
+    "if(!await actionConfirm((currentLang==='zh'?'确定要删除模型 '",
+)
+PAGE = PAGE.replace(
+    "const confirmation=prompt((currentLang==='zh'?'第二次确认：请输入完整模型名 '",
+    "const confirmation=await actionPrompt((currentLang==='zh'?'第二次确认：请输入完整模型名 '",
+)
+PAGE = PAGE.replace(
+    "if(!confirm((currentLang==='zh'?'最后确认：永久删除 '",
+    "if(!await actionConfirm((currentLang==='zh'?'最后确认：永久删除 '",
+)
+PAGE = PAGE.replace(
+    "if(!confirm(t('deleteConversation')+'？'))return;",
+    "if(!await actionConfirm(t('deleteConversation')+'？'))return;",
+)

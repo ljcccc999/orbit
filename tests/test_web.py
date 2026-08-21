@@ -85,6 +85,9 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert 'data-page="settings"' in PAGE
     assert 'id="settingsUpdateNow"' in PAGE
     assert "/api/conversations/delete" in PAGE
+    assert 'id="actionModal"' in PAGE
+    assert "function actionConfirm" in PAGE
+    assert "function actionPrompt" in PAGE
     assert "model:$('chatModel').value||null" in PAGE
     assert "/api/training/stop-delete" in PAGE
     assert "stopped_deleted" in PAGE
