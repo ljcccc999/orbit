@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import socket
 import subprocess
 import sys
 import tempfile
@@ -17,11 +18,33 @@ REPOSITORY = "ljcccc999/orbit"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 
 
+def _download_environment() -> dict[str, str]:
+    """Give the updater a local proxy only when one is actually listening.
+
+    LaunchAgents do not inherit the interactive shell's proxy variables on
+    macOS. The probe is local-only and does not change system proxy settings.
+    """
+    env = os.environ.copy()
+    if any(env.get(key) for key in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")):
+        return env
+    try:
+        with socket.create_connection(("127.0.0.1", 7890), timeout=0.2):
+            pass
+    except OSError:
+        return env
+    proxy = "http://127.0.0.1:7890"
+    for key in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        env[key] = proxy
+    env.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
+    env.setdefault("no_proxy", env["NO_PROXY"])
+    return env
+
+
 def current_version() -> str:
     try:
         return metadata.version("orbit-ai")
     except metadata.PackageNotFoundError:
-        return "0.6.4"
+        return "0.6.5"
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -82,7 +105,7 @@ def install_latest(info: UpdateInfo) -> int:
     if not info.available or not info.tag:
         return 0
     archive = f"https://github.com/{REPOSITORY}/archive/refs/tags/{info.tag}.tar.gz"
-    env = os.environ.copy()
+    env = _download_environment()
     env.update({"ORBIT_ARCHIVE_URL": archive, "ORBIT_NO_BROWSER": "1"})
     if platform.system() == "Windows":
         script = _download_script("install.ps1", info.tag)
