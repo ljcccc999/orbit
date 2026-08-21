@@ -472,7 +472,11 @@ class OrbitRuntime:
             normalized = self._safe_model_name(raw, raw)
         except ValueError as exc:
             return {"valid": False, "duplicate": False, "name": raw, "message": str(exc)}
-        duplicate = any((self.models_root / f"{normalized}{suffix}").is_file() for suffix in (".pt", ".json"))
+        # A JSON file is only metadata for a checkpoint.  Older interrupted
+        # runs could leave that metadata behind after the checkpoint was never
+        # created; it must not make a model appear to exist or reserve its
+        # name forever.
+        duplicate = (self.models_root / f"{normalized}.pt").is_file()
         return {
             "valid": not duplicate,
             "duplicate": duplicate,
@@ -659,11 +663,13 @@ class OrbitRuntime:
         model_id = display_name
         checkpoint = self.models_root / f"{model_id}.pt"
         metadata_path = self._metadata_path(model_id)
-        if checkpoint.exists() or metadata_path.exists():
+        # Only a real checkpoint occupies a model id.  An orphan metadata file
+        # is safe to replace when a new training run uses the same name.
+        if checkpoint.exists():
             if requested_name:
                 raise ValueError(f"模型名称已存在：{display_name}，请换一个名称")
             suffix = 2
-            while checkpoint.exists() or metadata_path.exists():
+            while checkpoint.exists():
                 model_id = f"{display_name}-{suffix}"
                 checkpoint = self.models_root / f"{model_id}.pt"
                 metadata_path = self._metadata_path(model_id)
