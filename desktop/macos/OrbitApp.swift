@@ -375,6 +375,7 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
             "Label": serviceMenuAgentLabel,
             "ProgramArguments": [executable],
             "RunAtLoad": true,
+            "KeepAlive": true,
             "ProcessType": "Background",
         ]
         do {
