@@ -105,7 +105,7 @@ The Training page offers two stop actions: **Safe stop and keep checkpoint** pre
 
 The advanced-parameter panel automatically recommends the safest configuration for the selected model size, device, available memory, sample count, and goal. It shows the estimated total time, time per step, peak memory, and the effect of changing steps, batch size, sequence length, gradient accumulation, and model scale. These are pre-training estimates; once a job starts, the measured step rate and remaining-time ETA replace them. On a typical 24 GB Apple Silicon Mac, the 300M preset with a small bilingual coding/world-knowledge run is the recommended starting point; larger presets may be blocked by the local memory gate or require a remote GPU.
 
-On Apple Silicon, the local MPS path uses FP16 autocast, fused causal attention, and sparse top-k expert evaluation. The automatic 300M starting profile is bounded to a 512-token context and one accumulation pass so a first run does not silently expand into an all-day job. FP32 remains available for numerical debugging but is expected to be substantially slower.
+On Apple Silicon, the local MPS path uses fused causal attention and sparse top-k expert evaluation. The automatic 300M starting profile is bounded to a 512-token context and one accumulation pass so a first run does not silently expand into an all-day job. MPS automatic precision stays FP32 because FP16 overflows the freshly initialized 300M output head on the tested stack; fused FP32 is still substantially faster than the old recurrent path. BF16 and FP16 remain explicit choices for hardware/configurations where they are stable.
 
 ## Collaborative training
 

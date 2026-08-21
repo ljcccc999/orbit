@@ -398,7 +398,7 @@ class OrbitRuntime:
             grad_accum=(1 if preset == "300m" else max(1, base.grad_accum // 4)) if local_mps else base.grad_accum,
             warmup_steps=warmup,
             checkpoint_every=checkpoint_every,
-            precision="fp16" if local_mps else "auto",
+            precision="fp32" if local_mps else "auto",
         )
         # Pre-training estimates are deliberately labeled as rough. Once a
         # run starts, training_state() replaces them with measured ETA from

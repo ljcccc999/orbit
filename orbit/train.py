@@ -42,6 +42,11 @@ def _autocast(device: torch.device, precision: str):
     # making auto use the accelerator's practical half precision.
     if device.type not in {"cuda", "mps"} or precision == "fp32":
         return nullcontext()
+    # On the tested Apple Silicon/MPS stack, FP16 overflows the freshly
+    # initialized 300M tied output head.  MPS FP32 with fused attention is
+    # already much faster than the old recurrent path, so auto stays stable.
+    if device.type == "mps" and precision == "auto":
+        return nullcontext()
     dtype = torch.float16 if precision in {"auto", "fp16"} else torch.bfloat16
     return torch.autocast(device_type=device.type, dtype=dtype)
 
