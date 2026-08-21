@@ -280,6 +280,17 @@ class OrbitRuntime:
             checkpoint_every=checkpoint_every,
             precision="auto",
         )
+        # Pre-training estimates are deliberately labeled as rough. Once a
+        # run starts, training_state() replaces them with measured ETA from
+        # completed optimizer steps. The baseline is calibrated to the local
+        # 300M MPS path and scaled by parameter count and token work.
+        parameter_scale = max(0.25, (model.estimate_parameters() / 308_450_304) ** 0.85)
+        token_work = (config.seq_len / 512) * config.batch_size * (config.grad_accum / 8)
+        device_factor = {"cpu": 2.0, "mps": 1.0, "cuda": 0.45}.get(device, 1.0)
+        estimated_step_seconds = max(1.0, 300.0 * parameter_scale * token_work * device_factor)
+        estimated_training_seconds = round(estimated_step_seconds * config.steps + 120)
+        activation_ratio = (config.seq_len / max(1, base.seq_len)) * (config.batch_size / max(1, base.batch_size))
+        estimated_peak_memory = max(required, required * (0.8 + 0.2 * max(0.25, activation_ratio)))
         return {
             "preset": preset,
             "device": device,
@@ -289,6 +300,11 @@ class OrbitRuntime:
             "available_memory_gb": round(available, 1),
             "recommended_examples": recommended_examples,
             "config": config.__dict__,
+            "estimated_step_seconds": round(estimated_step_seconds),
+            "estimated_training_seconds": estimated_training_seconds,
+            "estimated_peak_memory_gb": round(estimated_peak_memory, 1),
+            "estimated_activation_delta_gb": round(max(0.0, estimated_peak_memory - required), 1),
+            "estimate_note": "粗略估算；训练开始后会用实际步速和 ETA 替换。教师 API 生成时间另计。",
         }
 
     def system_state(self) -> dict[str, Any]:

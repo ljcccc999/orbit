@@ -42,3 +42,19 @@ def test_teacher_rejects_insecure_remote_http():
         assert "HTTPS" in str(exc)
     else:
         raise AssertionError("remote HTTP should be rejected")
+
+
+def test_teacher_retries_empty_content(monkeypatch):
+    calls = []
+
+    def fake_request(endpoint, api_key, body, attempts=3):
+        calls.append(1)
+        content = "" if len(calls) == 1 else "<|user|>Q\n<|assistant|>A"
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(teacher, "_request", fake_request)
+    text, _ = teacher.generate_dataset(
+        teacher.TeacherConfig(instruction="x", examples=1), "secret", threading.Event()
+    )
+    assert len(calls) == 2
+    assert "<|assistant|>A" in text

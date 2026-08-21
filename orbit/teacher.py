@@ -112,13 +112,22 @@ def generate_dataset(
             "temperature": 0.9,
             "max_tokens": 4000,
         }
-        data = _request(endpoint, api_key.strip(), payload)
-        try:
-            content = str(data["choices"][0]["message"]["content"]).strip()
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("教师 API 返回了无法识别的响应格式") from exc
+        content = ""
+        last_error: Exception | None = None
+        for content_attempt in range(1, 4):
+            data = _request(endpoint, api_key.strip(), payload)
+            try:
+                content = str(data["choices"][0]["message"]["content"]).strip()
+            except (KeyError, IndexError, TypeError) as exc:
+                last_error = RuntimeError("教师 API 返回了无法识别的响应格式")
+                content = ""
+            if content:
+                break
+            last_error = RuntimeError("教师 API 返回了空内容")
+            if content_attempt < 3:
+                time.sleep(content_attempt * 2)
         if not content:
-            raise RuntimeError("教师 API 返回了空内容")
+            raise last_error or RuntimeError("教师 API 返回了空内容")
         chunks.append(content)
         response_usage = data.get("usage") or {}
         for key in usage:

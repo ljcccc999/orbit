@@ -267,6 +267,10 @@ def test_training_recommendation_uses_model_device_and_data(tmp_path):
     assert short["config"]["batch_size"] == 1
     assert assisted["config"]["steps"] >= short["config"]["steps"]
     assert "feasible" in assisted
+    assert assisted["estimated_step_seconds"] > 0
+    assert assisted["estimated_training_seconds"] >= assisted["estimated_step_seconds"]
+    assert assisted["estimated_peak_memory_gb"] >= assisted["required_memory_gb"]
+    assert assisted["estimate_note"]
 
 
 def test_multiple_model_scoped_api_keys(tmp_path):
