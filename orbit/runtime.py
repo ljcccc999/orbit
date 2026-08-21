@@ -87,26 +87,80 @@ class OrbitRuntime:
         os.chmod(temporary, 0o600)
         os.replace(temporary, self.api_keys_path)
 
-    def _load_teacher_settings(self) -> dict[str, str]:
+    @staticmethod
+    def _default_teacher_settings() -> dict[str, Any]:
+        return {
+            "active_provider": "deepseek",
+            "profiles": {
+                "deepseek": {
+                    "base_url": "https://api.deepseek.com",
+                    "model": "deepseek-v4-flash",
+                    "api_key": "",
+                },
+                "custom": {"base_url": "", "model": "", "api_key": ""},
+            },
+        }
+
+    def _normalize_teacher_settings(self, value: Any) -> dict[str, Any]:
+        settings = self._default_teacher_settings()
+        if not isinstance(value, dict):
+            return settings
+        # Migrate Orbit 0.4.1's single-provider file without losing its key.
+        if "profiles" not in value:
+            settings["profiles"]["deepseek"] = {
+                "base_url": str(value.get("base_url", "https://api.deepseek.com")),
+                "model": str(value.get("model", "deepseek-v4-flash")),
+                "api_key": str(value.get("api_key", "")),
+            }
+            return settings
+        profiles = value.get("profiles")
+        if isinstance(profiles, dict):
+            for provider, profile in profiles.items():
+                if provider not in {"deepseek", "custom"} or not isinstance(profile, dict):
+                    continue
+                settings["profiles"][provider] = {
+                    "base_url": str(profile.get("base_url", "")),
+                    "model": str(profile.get("model", "")),
+                    "api_key": str(profile.get("api_key", "")),
+                }
+        active = str(value.get("active_provider", "deepseek"))
+        settings["active_provider"] = active if active in settings["profiles"] else "deepseek"
+        return settings
+
+    def _load_teacher_settings(self) -> dict[str, Any]:
         if self.teacher_settings_path.is_file():
             try:
                 value = json.loads(self.teacher_settings_path.read_text(encoding="utf-8"))
-                if isinstance(value, dict):
-                    return {str(key): str(item) for key, item in value.items()}
+                return self._normalize_teacher_settings(value)
             except (OSError, json.JSONDecodeError):
                 pass
-        return {"base_url": "https://api.deepseek.com", "model": "deepseek-v4-flash", "api_key": ""}
+        return self._default_teacher_settings()
 
-    def _save_teacher_settings(self, settings: dict[str, str]) -> None:
+    def _save_teacher_settings(self, settings: dict[str, Any]) -> None:
+        settings = self._normalize_teacher_settings(settings)
         temporary = self.teacher_settings_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.chmod(temporary, 0o600)
         os.replace(temporary, self.teacher_settings_path)
-        self._teacher_settings = dict(settings)
+        self._teacher_settings = settings
 
-    def teacher_settings(self) -> dict[str, str]:
+    def teacher_settings(self) -> dict[str, Any]:
         with self._state_lock:
-            return dict(self._teacher_settings)
+            return json.loads(json.dumps(self._teacher_settings))
+
+    def save_teacher_profile(self, provider: str, base_url: str, model: str, api_key: str) -> dict[str, Any]:
+        provider = provider.strip().lower()
+        if provider not in {"deepseek", "custom"}:
+            raise ValueError("不支持的教师 API 提供商")
+        values = {"base_url": base_url.strip(), "model": model.strip(), "api_key": api_key.strip()}
+        if any("\n" in value or len(value) > 1000 for value in values.values()):
+            raise ValueError("教师 API 配置无效")
+        with self._state_lock:
+            settings = self.teacher_settings()
+            settings["active_provider"] = provider
+            settings["profiles"][provider] = values
+            self._save_teacher_settings(settings)
+            return self.teacher_settings()
 
     @property
     def local_api_key(self) -> str:
@@ -166,6 +220,50 @@ class OrbitRuntime:
                 "can_train_here": cfg.estimated_training_memory_gb() <= max(0, snapshot["memory_available_gb"] - 2),
             })
         return rows
+
+    def training_recommendation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        preset = str(payload.get("preset", "300m")).lower()
+        if preset not in PRESETS:
+            raise ValueError("不支持的模型规模")
+        device = str(payload.get("device", "auto")).lower()
+        if device not in {"auto", "mps", "cuda", "cpu"}:
+            raise ValueError("不支持的训练设备")
+        examples = max(1, min(100, int(payload.get("examples", 20))))
+        text_chars = max(0, min(100_000_000, int(payload.get("text_chars", 0))))
+        model = OrbitConfig.for_preset(preset)
+        base = TrainingConfig.for_model(preset)
+        resources = resource_snapshot(self.data_root)
+        available = float(resources.get("memory_available_gb", 0) or 0)
+        required = model.estimated_training_memory_gb()
+        safe_budget = max(0.0, available - 2.0)
+        feasible = required <= safe_budget
+        pressure = required / safe_budget if safe_budget else float("inf")
+        seq_len = base.seq_len
+        if pressure > 0.75:
+            seq_len = max(256, seq_len // 2)
+        if device == "cpu":
+            seq_len = min(seq_len, 1024)
+        data_units = examples if bool(payload.get("assisted")) else max(1, text_chars // max(256, seq_len))
+        steps = max(100, min(2000, data_units * (20 if bool(payload.get("assisted")) else 8)))
+        warmup = max(10, min(200, steps // 10))
+        checkpoint_every = max(25, min(250, steps // 5))
+        config = base.with_overrides(
+            steps=steps,
+            batch_size=1 if pressure > 0.55 or device == "cpu" else base.batch_size,
+            seq_len=seq_len,
+            warmup_steps=warmup,
+            checkpoint_every=checkpoint_every,
+            precision="auto",
+        )
+        return {
+            "preset": preset,
+            "device": device,
+            "feasible": feasible,
+            "reason": "local_memory" if not feasible else "balanced_for_device_and_data",
+            "required_memory_gb": round(required, 1),
+            "available_memory_gb": round(available, 1),
+            "config": config.__dict__,
+        }
 
     def system_state(self) -> dict[str, Any]:
         return {
@@ -478,7 +576,8 @@ class OrbitRuntime:
         self._training_config(payload)
         if not api_key or "\n" in api_key or len(api_key) > 1000:
             raise ValueError("请填写有效的 API Key")
-        self._save_teacher_settings({"base_url": teacher.base_url, "model": teacher.model, "api_key": api_key})
+        provider = str(payload.get("teacher_provider", "deepseek"))
+        self.save_teacher_profile(provider, teacher.base_url, teacher.model, api_key)
         with self._state_lock:
             self._assert_idle()
             self._stop_event.clear()

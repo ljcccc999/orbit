@@ -37,9 +37,15 @@ def test_untrained_runtime_still_has_orbit_identity(tmp_path):
 
 
 def test_desktop_workspace_keeps_training_page_scrollable():
-    assert ".workspace{min-width:0;min-height:0" in PAGE
-    assert ".content{min-height:0;overflow-x:hidden;overflow-y:auto" in PAGE
+    assert ".workspace{min-width:0;min-height:0;height:100vh;overflow:hidden" in PAGE
+    assert 'class="content" id="content"' in PAGE
+    assert "#train.page.active{height:100%;min-height:0;overflow-y:scroll" in PAGE
+    assert "document.addEventListener('wheel'" in PAGE
+    assert "{capture:true,passive:false}" in PAGE
     assert "serviceUnavailable:'Orbit 本地服务暂时不可用，正在重新连接…'" in PAGE
+    assert 'id="newChat"' in PAGE
+    assert 'data-i18n="examplesHelp"' in PAGE
+    assert "/api/training/recommendation" in PAGE
 
 
 def test_http_health_models_and_openai_chat(tmp_path):
@@ -52,6 +58,24 @@ def test_http_health_models_and_openai_chat(tmp_path):
     try:
         with urllib.request.urlopen(base + "/api/health") as response:
             assert json.loads(response.read())["name"] == "orbit"
+        teacher_request = urllib.request.Request(
+            base + "/api/teacher/settings",
+            data=json.dumps({
+                "provider": "custom", "base_url": "https://teacher.example/v1",
+                "model": "teacher", "api_key": "teacher-secret",
+            }).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(teacher_request) as response:
+            teacher = json.loads(response.read())
+            assert teacher["profiles"]["custom"]["api_key"] == "teacher-secret"
+        recommend_request = urllib.request.Request(
+            base + "/api/training/recommendation",
+            data=json.dumps({"preset": "300m", "device": "cpu", "text_chars": 2000}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(recommend_request) as response:
+            assert json.loads(response.read())["config"]["batch_size"] == 1
         headers = {"Authorization": f"Bearer {runtime.local_api_key}"}
         with urllib.request.urlopen(urllib.request.Request(base + "/v1/models", headers=headers)) as response:
             assert json.loads(response.read())["data"][0]["id"] == "orbit-test"
@@ -159,10 +183,37 @@ def test_secondary_training_records_parent_and_server_export(tmp_path):
 
 def test_teacher_api_settings_persist_locally(tmp_path):
     runtime = OrbitRuntime(tmp_path)
-    runtime._save_teacher_settings({"base_url": "https://example.com/v1", "model": "teacher", "api_key": "secret"})
+    runtime.save_teacher_profile("deepseek", "https://api.deepseek.com", "deepseek-chat", "deep-secret")
+    runtime.save_teacher_profile("custom", "https://example.com/v1", "teacher", "custom-secret")
+    runtime.save_teacher_profile("deepseek", "https://api.deepseek.com", "deepseek-reasoner", "new-deep-secret")
     reloaded = OrbitRuntime(tmp_path)
-    assert reloaded.teacher_settings()["api_key"] == "secret"
+    settings = reloaded.teacher_settings()
+    assert settings["active_provider"] == "deepseek"
+    assert settings["profiles"]["deepseek"]["model"] == "deepseek-reasoner"
+    assert settings["profiles"]["deepseek"]["api_key"] == "new-deep-secret"
+    assert settings["profiles"]["custom"]["api_key"] == "custom-secret"
     assert reloaded.teacher_settings_path.stat().st_mode & 0o077 == 0
+
+
+def test_legacy_teacher_api_settings_are_migrated(tmp_path):
+    path = tmp_path / "teacher-api.json"
+    path.write_text(json.dumps({"base_url": "https://old.example/v1", "model": "old", "api_key": "kept"}))
+    settings = OrbitRuntime(tmp_path).teacher_settings()
+    assert settings["profiles"]["deepseek"] == {
+        "base_url": "https://old.example/v1", "model": "old", "api_key": "kept",
+    }
+
+
+def test_training_recommendation_uses_model_device_and_data(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    short = runtime.training_recommendation({"preset": "300m", "device": "cpu", "text_chars": 1000})
+    assisted = runtime.training_recommendation({
+        "preset": "300m", "device": "auto", "examples": 40, "assisted": True,
+    })
+    assert short["config"]["seq_len"] <= 1024
+    assert short["config"]["batch_size"] == 1
+    assert assisted["config"]["steps"] >= short["config"]["steps"]
+    assert "feasible" in assisted
 
 
 def test_multiple_model_scoped_api_keys(tmp_path):

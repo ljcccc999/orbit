@@ -176,6 +176,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(202, self.server.runtime.start_training(data))
             elif path == "/api/training/auto":
                 self._json(202, self.server.runtime.start_auto_training(data))
+            elif path == "/api/training/recommendation":
+                self._json(200, self.server.runtime.training_recommendation(data))
+            elif path == "/api/teacher/settings":
+                self._json(200, self.server.runtime.save_teacher_profile(
+                    str(data.get("provider", "")), str(data.get("base_url", "")),
+                    str(data.get("model", "")), str(data.get("api_key", "")),
+                ))
             elif path == "/api/training/stop":
                 self._json(202, self.server.runtime.stop_training())
             elif path == "/api/models/load":

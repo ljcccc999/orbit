@@ -97,7 +97,7 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
         window.delegate = self
         window.title = "Orbit"
         window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.center()
         window.minSize = NSSize(width: 820, height: 600)
 

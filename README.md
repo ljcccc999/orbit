@@ -19,7 +19,8 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Runs a crash-recovering background API on macOS, Linux, and Windows.
 - Keeps a native menu-bar or system-tray controller running when its window is closed; only **Quit Orbit** stops the local service.
 - Loads weights on demand and automatically unloads an idle model after five minutes.
-- Can use DeepSeek or another OpenAI-compatible API to generate a parameter-aware supervised dataset and then start local training. The teacher API settings are saved only on the local computer with restricted file permissions.
+- Can use DeepSeek or another OpenAI-compatible API to generate a parameter-aware supervised dataset and then start local training. Each provider keeps its own local model, URL, and API key; replacing one key does not affect another provider.
+- Automatically tunes advanced parameters for the selected model size, device, available memory, and amount of local or teacher-generated data. Unsafe local configurations are blocked before allocation and the UI recommends a remote GPU bundle.
 - Saves locally trained checkpoints under `~/.orbit/models`.
 - Supports custom model names, secondary training from an existing checkpoint, parent-model lineage, and inspectable content/configuration for every training run.
 - Preserves the Orbit product identity independently of a user's custom model name, including before the first model is trained and in exported server packages.
@@ -87,7 +88,7 @@ Open the **Training** page, choose a preset, optionally name the model or select
 
 1. **Train on this computer** starts a local job only after the memory gate passes. The checkpoint stays in `~/.orbit/models`.
 2. **Create remote GPU bundle** downloads a ZIP containing the dataset, configuration, Orbit source, and a `run.sh` entry point for a CUDA machine.
-3. **Generate data and automatically train** calls DeepSeek or another OpenAI-compatible teacher API. Orbit tells the teacher the selected parameter count, context length, steps, parent model, and user goal so the examples can be adapted to the target size. The generated dataset stays local. The provider settings and key are saved in `~/.orbit/teacher-api.json` with user-only file permissions; the key is never copied into training history or exports. The goal leaves the computer and the provider may charge for usage, so this path requires explicit confirmation.
+3. **Generate data and automatically train** calls DeepSeek or another OpenAI-compatible teacher API. Orbit tells the teacher the selected parameter count, context length, steps, parent model, and user goal so the examples can be adapted to the target size. The sample count controls dataset coverage, generation time, and provider cost. The generated dataset stays local. Each provider's model, URL, and key is saved separately in `~/.orbit/teacher-api.json` with user-only file permissions, so switching back restores that provider and entering a new key replaces only its previous key. Keys are never copied into training history or exports. The goal leaves the computer and the provider may charge for usage, so this path requires explicit confirmation.
 
 Every actual training run writes an inspectable record under `~/.orbit/training-runs`, including the exact dataset, parameters, status, loss, result, model name, and parent model. Selecting **Train again** creates a new checkpoint and a fresh optimizer instead of overwriting the parent.
 
@@ -95,7 +96,7 @@ The 300M–38B choices describe architecture sizes; they are not pretrained mode
 
 ## Chat locally
 
-After training finishes, open **Chat**, load a checkpoint, and send a message. The model is loaded from local storage and inference does not require an internet connection. The background API can answer while the web page and desktop app are closed. If weights were unloaded during idle time, the first new request loads them again and may take longer.
+After training finishes, open **Chat** and send a message—manual loading is not required. Orbit automatically chooses and loads the local checkpoint, similar to Ollama. Inference does not require an internet connection, and **New chat** clears the visible conversation without changing models or keys. The background API can answer while the web page and desktop app are closed. If weights were unloaded during idle time, the first new request loads them again and may take longer.
 
 Orbit currently uses a byte-level experimental tokenizer and architecture. A very small or short training run validates the workflow but will not produce a generally capable assistant.
 
