@@ -184,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.community.list())
             elif path == "/api/conversations":
                 self._json(200, self.server.runtime.conversations.list())
+            elif path == "/api/memory":
+                self._json(200, self.server.runtime.memory.list())
             elif path.startswith("/api/conversations/"):
                 self._json(200, self.server.runtime.conversations.get(path.split("/")[3]))
             elif path == "/api/hub":
@@ -239,6 +241,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.save_teacher_profile(
                     str(data.get("provider", "")), str(data.get("base_url", "")),
                     str(data.get("model", "")), str(data.get("api_key", "")),
+                    str(data.get("profile_id", "")), bool(data.get("create_new", False)),
+                ))
+            elif path == "/api/teacher/settings/select":
+                self._json(200, self.server.runtime.select_teacher_profile(
+                    str(data.get("provider", "")), str(data.get("profile_id", "")),
+                ))
+            elif path == "/api/teacher/settings/delete":
+                self._json(200, self.server.runtime.delete_teacher_profile(
+                    str(data.get("provider", "")), str(data.get("profile_id", "")),
                 ))
             elif path == "/api/community/submit":
                 self._json(201, self.server.runtime.community.submit(data))
@@ -285,12 +296,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(201, self.server.runtime.conversations.create())
             elif path == "/api/conversations/delete":
                 self._json(200, self.server.runtime.conversations.delete(str(data.get("id", ""))))
+            elif path == "/api/conversations/archive":
+                self._json(200, self.server.runtime.conversations.archive(str(data.get("id", ""))))
+            elif path == "/api/memory":
+                self._json(201, self.server.runtime.memory.add(str(data.get("content", ""))))
+            elif path == "/api/memory/delete":
+                self._json(200, self.server.runtime.memory.delete(str(data.get("id", ""))))
             elif path == "/api/training/stop":
                 self._json(202, self.server.runtime.stop_training())
             elif path == "/api/training/stop-delete":
                 self._json(202, self.server.runtime.stop_training(delete_checkpoint=True))
             elif path == "/api/training/resume":
                 self._json(202, self.server.runtime.resume_pending_training())
+            elif path == "/api/training/runs/delete":
+                self._json(200, self.server.runtime.delete_training_run(str(data.get("id", ""))))
             elif path == "/api/models/load":
                 self._json(202, self.server.runtime.start_load_model(str(data.get("model", ""))))
             elif path == "/api/models/unload":

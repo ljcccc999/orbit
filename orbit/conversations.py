@@ -25,9 +25,23 @@ class ConversationStore:
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
 
+    @staticmethod
+    def _summary(row: dict[str, Any]) -> str:
+        prompts = [
+            " ".join(str(message.get("content", "")).split())
+            for message in row.get("messages", [])
+            if message.get("role") == "user" and str(message.get("content", "")).strip()
+        ]
+        if not prompts:
+            return ""
+        # Keep the sidebar useful without making another model/API call. The
+        # summary combines the user's turns and falls back to the first turn.
+        compact = " · ".join(prompts[:4])
+        return compact[:96] + ("…" if len(compact) > 96 else "")
+
     def create(self) -> dict[str, Any]:
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        row = {"id": secrets.token_hex(12), "title": "New conversation", "created_at": stamp, "updated_at": stamp, "messages": []}
+        row = {"id": secrets.token_hex(12), "title": "New conversation", "summary": "", "archived": False, "created_at": stamp, "updated_at": stamp, "messages": []}
         self._write(row)
         return row
 
@@ -44,12 +58,25 @@ class ConversationStore:
         path.unlink()
         return {"status": "deleted", "id": conversation_id}
 
+    def archive(self, conversation_id: str) -> dict[str, str]:
+        row = self.get(conversation_id)
+        row["archived"] = True
+        row["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        self._write(row)
+        return {"status": "archived", "id": conversation_id}
+
     def list(self) -> list[dict[str, Any]]:
         rows = []
         for path in self.root.glob("*.json"):
             try:
                 row = json.loads(path.read_text(encoding="utf-8"))
-                rows.append({key: row[key] for key in ("id", "title", "created_at", "updated_at")})
+                if row.get("archived") is True:
+                    continue
+                summary = row.get("summary") or self._summary(row)
+                rows.append({
+                    "id": row["id"], "title": row.get("title") or "New conversation",
+                    "summary": summary, "created_at": row["created_at"], "updated_at": row["updated_at"],
+                })
             except (OSError, KeyError, json.JSONDecodeError):
                 continue
         return sorted(rows, key=lambda row: row["updated_at"], reverse=True)
@@ -57,9 +84,11 @@ class ConversationStore:
     def append_exchange(self, conversation_id: str, prompt: str, answer: str) -> dict[str, Any]:
         row = self.get(conversation_id)
         row["messages"].extend(({"role": "user", "content": prompt}, {"role": "assistant", "content": answer}))
-        if len(row["messages"]) == 2:
-            compact = " ".join(prompt.split())
-            row["title"] = compact[:48] + ("…" if len(compact) > 48 else "")
+        summary = self._summary(row)
+        if summary:
+            row["summary"] = summary
+            first_sentence = " ".join(prompt.split()).split("。", 1)[0].split(".", 1)[0].strip()
+            row["title"] = first_sentence[:48] + ("…" if len(first_sentence) > 48 else "")
         row["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         self._write(row)
         return row

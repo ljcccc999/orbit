@@ -84,19 +84,22 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert 'autocomplete="new-password"' in PAGE
     assert 'data-page="settings"' in PAGE
     assert 'id="settingsUpdateNow"' in PAGE
-    assert "/api/conversations/delete" in PAGE
+    assert "/api/conversations/archive" in PAGE
     assert 'id="actionModal"' in PAGE
     assert "function actionConfirm" in PAGE
     assert "function actionPrompt" in PAGE
+    assert "PAGE = PAGE.replace" not in PAGE
+    assert 'id="memoryInput"' in PAGE
+    assert 'id="saveMemory"' in PAGE
+    assert "Orbit ${system.resources.orbit_memory_gb" in PAGE
+    assert "function renderTeacherProfiles" in PAGE
     assert "model:$('chatModel').value||null" in PAGE
     assert "/api/training/stop-delete" in PAGE
     assert "stopped_deleted" in PAGE
     assert 'id="createRemoteAI"' in PAGE
-    assert 'id="importRemote"' in PAGE
-    assert 'id="importRemoteAI"' in PAGE
-    assert "/api/hub/job-upload" in PAGE
-    assert "gpu_training_bundle" in PAGE
-    assert "Second confirmation" in PAGE
+    assert 'id="importRemote"' not in PAGE
+    assert 'id="importRemoteAI"' not in PAGE
+    assert "Training history deleted." in PAGE
     assert 'data-i18n="examplesHelp"' in PAGE
     assert 'id="teacherKey" type="password"' in PAGE
     assert 'data-paste-enabled="true"' in PAGE
@@ -130,13 +133,13 @@ def test_http_health_models_and_openai_chat(tmp_path):
         )
         with urllib.request.urlopen(conversation_request) as response:
             conversation = json.loads(response.read())
-        delete_request = urllib.request.Request(
-            base + "/api/conversations/delete",
+        archive_request = urllib.request.Request(
+            base + "/api/conversations/archive",
             data=json.dumps({"id": conversation["id"]}).encode(),
             headers={"Content-Type": "application/json"}, method="POST",
         )
-        with urllib.request.urlopen(delete_request) as response:
-            assert json.loads(response.read())["status"] == "deleted"
+        with urllib.request.urlopen(archive_request) as response:
+            assert json.loads(response.read())["status"] == "archived"
         teacher_request = urllib.request.Request(
             base + "/api/teacher/settings",
             data=json.dumps({
@@ -147,8 +150,9 @@ def test_http_health_models_and_openai_chat(tmp_path):
         )
         with urllib.request.urlopen(teacher_request) as response:
             teacher = json.loads(response.read())
-            assert teacher["profiles"]["custom"]["has_api_key"] is True
-            assert "api_key" not in teacher["profiles"]["custom"]
+            entry = teacher["profiles"]["custom"]["entries"][0]
+            assert entry["has_api_key"] is True
+            assert "api_key" not in entry
         recommend_request = urllib.request.Request(
             base + "/api/training/recommendation",
             data=json.dumps({"preset": "300m", "device": "cpu", "text_chars": 2000}).encode(),
@@ -273,9 +277,12 @@ def test_teacher_api_settings_persist_locally(tmp_path):
     reloaded = OrbitRuntime(tmp_path)
     settings = reloaded.teacher_settings()
     assert settings["active_provider"] == "deepseek"
-    assert settings["profiles"]["deepseek"]["model"] == "deepseek-reasoner"
-    assert settings["profiles"]["deepseek"]["api_key"] == "new-deep-secret"
-    assert settings["profiles"]["custom"]["api_key"] == "custom-secret"
+    deepseek = settings["profiles"]["deepseek"]
+    custom = settings["profiles"]["custom"]
+    assert len(deepseek) == 1
+    assert deepseek[0]["model"] == "deepseek-reasoner"
+    assert deepseek[0]["api_key"] == "new-deep-secret"
+    assert custom[0]["api_key"] == "custom-secret"
     assert reloaded.teacher_settings_path.stat().st_mode & 0o077 == 0
 
 
@@ -283,9 +290,9 @@ def test_legacy_teacher_api_settings_are_migrated(tmp_path):
     path = tmp_path / "teacher-api.json"
     path.write_text(json.dumps({"base_url": "https://old.example/v1", "model": "old", "api_key": "kept"}))
     settings = OrbitRuntime(tmp_path).teacher_settings()
-    assert settings["profiles"]["deepseek"] == {
-        "base_url": "https://old.example/v1", "model": "old", "api_key": "kept",
-    }
+    assert settings["profiles"]["deepseek"][0]["base_url"] == "https://old.example/v1"
+    assert settings["profiles"]["deepseek"][0]["model"] == "old"
+    assert settings["profiles"]["deepseek"][0]["api_key"] == "kept"
 
 
 def test_training_recommendation_uses_model_device_and_data(tmp_path):

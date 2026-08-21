@@ -5,6 +5,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -17,6 +18,7 @@ from .community import CommunityStore
 from .conversations import ConversationStore
 from .hub import OrbitHubClient
 from .jobs import create_job_bundle
+from .memory import LongTermMemory
 from .identity import (
     ORBIT_SYSTEM_PROMPT,
     ORBIT_TRAINING_ANCHOR,
@@ -52,6 +54,7 @@ class OrbitRuntime:
         self._teacher_settings = self._load_teacher_settings()
         self.community = CommunityStore(self.data_root)
         self.conversations = ConversationStore(self.data_root)
+        self.memory = LongTermMemory(self.data_root)
         self.hub = OrbitHubClient(self.data_root)
         self.settings = OrbitSettings(self.data_root)
         self._hub_upload: dict[str, Any] = {"status": "idle", "progress": 0, "message": "尚未上传", "model": None}
@@ -107,14 +110,8 @@ class OrbitRuntime:
     def _default_teacher_settings() -> dict[str, Any]:
         return {
             "active_provider": "deepseek",
-            "profiles": {
-                "deepseek": {
-                    "base_url": "https://api.deepseek.com",
-                    "model": "deepseek-v4-flash",
-                    "api_key": "",
-                },
-                "custom": {"base_url": "", "model": "", "api_key": ""},
-            },
+            "active_profiles": {"deepseek": "", "custom": ""},
+            "profiles": {"deepseek": [], "custom": []},
         }
 
     def _normalize_teacher_settings(self, value: Any) -> dict[str, Any]:
@@ -123,24 +120,45 @@ class OrbitRuntime:
             return settings
         # Migrate Orbit 0.4.1's single-provider file without losing its key.
         if "profiles" not in value:
-            settings["profiles"]["deepseek"] = {
+            settings["profiles"]["deepseek"] = [{
+                "id": secrets.token_hex(8),
                 "base_url": str(value.get("base_url", "https://api.deepseek.com")),
                 "model": str(value.get("model", "deepseek-v4-flash")),
                 "api_key": str(value.get("api_key", "")),
-            }
+            }]
+            settings["active_profiles"]["deepseek"] = settings["profiles"]["deepseek"][0]["id"]
             return settings
         profiles = value.get("profiles")
         if isinstance(profiles, dict):
             for provider, profile in profiles.items():
                 if provider not in {"deepseek", "custom"} or not isinstance(profile, dict):
-                    continue
-                settings["profiles"][provider] = {
-                    "base_url": str(profile.get("base_url", "")),
-                    "model": str(profile.get("model", "")),
-                    "api_key": str(profile.get("api_key", "")),
-                }
+                    if provider not in {"deepseek", "custom"} or not isinstance(profile, list):
+                        continue
+                raw_rows = profile.get("entries", []) if isinstance(profile, dict) else profile
+                if isinstance(profile, dict) and "api_key" in profile:
+                    raw_rows = [profile]
+                rows = []
+                if isinstance(raw_rows, list):
+                    for row in raw_rows:
+                        if not isinstance(row, dict):
+                            continue
+                        rows.append({
+                            "id": str(row.get("id", "")) or secrets.token_hex(8),
+                            "base_url": str(row.get("base_url", "")),
+                            "model": str(row.get("model", "")),
+                            "api_key": str(row.get("api_key", "")),
+                        })
+                settings["profiles"][provider] = rows
         active = str(value.get("active_provider", "deepseek"))
         settings["active_provider"] = active if active in settings["profiles"] else "deepseek"
+        active_profiles = value.get("active_profiles", {})
+        if isinstance(active_profiles, dict):
+            for provider, profile_id in active_profiles.items():
+                if provider in settings["profiles"] and any(row["id"] == str(profile_id) for row in settings["profiles"][provider]):
+                    settings["active_profiles"][provider] = str(profile_id)
+        for provider, rows in settings["profiles"].items():
+            if not settings["active_profiles"].get(provider) and rows:
+                settings["active_profiles"][provider] = rows[0]["id"]
         return settings
 
     def _load_teacher_settings(self) -> dict[str, Any]:
@@ -166,11 +184,23 @@ class OrbitRuntime:
 
     def public_teacher_settings(self) -> dict[str, Any]:
         settings = self.teacher_settings()
-        for profile in settings["profiles"].values():
-            profile["has_api_key"] = bool(profile.pop("api_key", ""))
+        public_profiles: dict[str, Any] = {}
+        for provider, rows in settings["profiles"].items():
+            public_profiles[provider] = {
+                "active_id": settings["active_profiles"].get(provider, ""),
+                "entries": [
+                    {
+                        "id": row["id"], "base_url": row["base_url"], "model": row["model"],
+                        "has_api_key": bool(row.get("api_key")),
+                        "key_hint": ("••••" + row["api_key"][-4:]) if row.get("api_key") else "",
+                    }
+                    for row in rows
+                ],
+            }
+        settings["profiles"] = public_profiles
         return settings
 
-    def save_teacher_profile(self, provider: str, base_url: str, model: str, api_key: str) -> dict[str, Any]:
+    def save_teacher_profile(self, provider: str, base_url: str, model: str, api_key: str, profile_id: str = "", create_new: bool = False) -> dict[str, Any]:
         provider = provider.strip().lower()
         if provider not in {"deepseek", "custom"}:
             raise ValueError("不支持的教师 API 提供商")
@@ -179,10 +209,50 @@ class OrbitRuntime:
             raise ValueError("教师 API 配置无效")
         with self._state_lock:
             settings = self.teacher_settings()
-            if not values["api_key"]:
-                values["api_key"] = settings["profiles"][provider].get("api_key", "")
+            rows = settings["profiles"].setdefault(provider, [])
+            profile_id = profile_id.strip()
+            selected = next((row for row in rows if row["id"] == profile_id), None)
+            if selected is None and not create_new:
+                active_id = settings["active_profiles"].get(provider, "")
+                selected = next((row for row in rows if row["id"] == active_id), None)
+            if selected is not None:
+                if not values["api_key"]:
+                    values["api_key"] = selected.get("api_key", "")
+                selected.update(values)
+                profile_id = selected["id"]
+            else:
+                if not values["api_key"]:
+                    raise ValueError("请填写有效的 API Key")
+                profile_id = secrets.token_hex(8)
+                rows.append({"id": profile_id, **values})
             settings["active_provider"] = provider
-            settings["profiles"][provider] = values
+            settings["active_profiles"][provider] = profile_id
+            self._save_teacher_settings(settings)
+            return self.public_teacher_settings()
+
+    def select_teacher_profile(self, provider: str, profile_id: str) -> dict[str, Any]:
+        provider = provider.strip().lower()
+        with self._state_lock:
+            settings = self.teacher_settings()
+            rows = settings["profiles"].get(provider, [])
+            if provider not in {"deepseek", "custom"} or not any(row["id"] == profile_id for row in rows):
+                raise ValueError("找不到教师 API 配置")
+            settings["active_provider"] = provider
+            settings["active_profiles"][provider] = profile_id
+            self._save_teacher_settings(settings)
+            return self.public_teacher_settings()
+
+    def delete_teacher_profile(self, provider: str, profile_id: str) -> dict[str, Any]:
+        provider = provider.strip().lower()
+        with self._state_lock:
+            settings = self.teacher_settings()
+            rows = settings["profiles"].get(provider, [])
+            remaining = [row for row in rows if row["id"] != profile_id]
+            if len(remaining) == len(rows):
+                raise FileNotFoundError("找不到教师 API 配置")
+            settings["profiles"][provider] = remaining
+            active_id = settings["active_profiles"].get(provider, "")
+            settings["active_profiles"][provider] = active_id if any(row["id"] == active_id for row in remaining) else (remaining[0]["id"] if remaining else "")
             self._save_teacher_settings(settings)
             return self.public_teacher_settings()
 
@@ -310,8 +380,17 @@ class OrbitRuntime:
         }
 
     def system_state(self) -> dict[str, Any]:
+        orbit_memory = None
+        try:
+            import psutil
+            process = psutil.Process(os.getpid())
+            orbit_memory = process.memory_info().rss
+            orbit_memory += sum(child.memory_info().rss for child in process.children(recursive=True) if child.is_running())
+        except Exception:
+            pass
         return {
             **resource_snapshot(self.data_root),
+            "orbit_memory_gb": round(orbit_memory / 1_000_000_000, 2) if orbit_memory is not None else None,
             "model_loaded": self._model is not None,
             "idle_unload_seconds": self.idle_unload_seconds,
             "heavy_runtime_loaded": "torch" in sys.modules,
@@ -414,6 +493,24 @@ class OrbitRuntime:
         training_dataset = Path(str(row.get("training_dataset", "")))
         row["training_content"] = training_dataset.read_text(encoding="utf-8") if training_dataset.is_file() else ""
         return row
+
+    def delete_training_run(self, run_id: str) -> dict[str, str]:
+        if Path(run_id).name != run_id or not run_id:
+            raise ValueError("无效的训练记录")
+        root = self.training_runs_root / run_id
+        path = root / "run.json"
+        if not path.is_file():
+            raise FileNotFoundError("找不到训练记录")
+        row = json.loads(path.read_text(encoding="utf-8"))
+        for key in ("dataset", "training_dataset"):
+            candidate = Path(str(row.get(key, "")))
+            try:
+                if candidate.is_file() and candidate.resolve().parent == self.datasets_root.resolve():
+                    candidate.unlink()
+            except OSError:
+                pass
+        shutil.rmtree(root)
+        return {"status": "deleted", "id": run_id}
 
     def _save_run(self, run: dict[str, Any]) -> None:
         root = self.training_runs_root / str(run["id"])
@@ -653,7 +750,11 @@ class OrbitRuntime:
         if payload.get("acknowledge_cost") is not True:
             raise ValueError("请先确认训练目标会发送给所选 AI API，且提供商可能收取费用")
         provider = str(payload.get("teacher_provider", "deepseek")).strip().lower()
-        stored_profile = self.teacher_settings().get("profiles", {}).get(provider, {})
+        private_settings = self.teacher_settings()
+        stored_rows = private_settings.get("profiles", {}).get(provider, [])
+        requested_profile_id = str(payload.get("teacher_profile_id", "")).strip()
+        active_profile_id = private_settings.get("active_profiles", {}).get(provider, "")
+        stored_profile = next((row for row in stored_rows if row.get("id") == (requested_profile_id or active_profile_id)), {})
         api_key = str(payload.get("api_key", "")).strip() or str(stored_profile.get("api_key", "")).strip()
         teacher = TeacherConfig(
             base_url=str(payload.get("teacher_base_url", "https://api.deepseek.com")),
@@ -666,7 +767,7 @@ class OrbitRuntime:
         self._training_config(payload)
         if not api_key or "\n" in api_key or len(api_key) > 1000:
             raise ValueError("请填写有效的 API Key")
-        self.save_teacher_profile(provider, teacher.base_url, teacher.model, api_key)
+        self.save_teacher_profile(provider, teacher.base_url, teacher.model, api_key, profile_id=requested_profile_id or active_profile_id)
         with self._state_lock:
             self._assert_idle()
             self._stop_event.clear()
@@ -1046,6 +1147,7 @@ class OrbitRuntime:
                 "model_name": resolved_name,
                 "content": identity_response(prompt),
             }
+        memory_context = self.memory.system_context()
         if model_id:
             self.load_model(model_id)
         elif self.active_model_id is None:
@@ -1061,6 +1163,7 @@ class OrbitRuntime:
             self._model.stdin.write(json.dumps({
                 "command": "chat", "prompt": prompt, "max_tokens": max_tokens,
                 "temperature": temperature, "system_prompt": ORBIT_IDENTITY,
+                "memory_context": memory_context,
                 "model_name": metadata.get("name", self._model_id),
             }, ensure_ascii=False) + "\n")
             self._model.stdin.flush()

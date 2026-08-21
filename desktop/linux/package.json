@@ -1,6 +1,6 @@
 {
   "name": "orbit-linux-desktop",
-  "version": "0.6.13",
+  "version": "0.6.14",
   "private": true,
   "description": "Orbit local AI desktop app for Linux",
   "main": "main.js",
