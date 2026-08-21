@@ -19,7 +19,12 @@ from .config import OrbitConfig
 from .jobs import create_job_bundle
 from .runtime import OrbitRuntime
 from .training_config import TrainingConfig
+from . import updater
 from .web_ui import PAGE
+
+PAGE = PAGE.replace("system.active_model||t('idle')", "system.active_model_name||system.active_model||t('idle')")
+PAGE = PAGE.replace("system.active_model||'Orbit'", "system.active_model_name||system.active_model||'Orbit'")
+PAGE = PAGE.replace("system.active_model||t('inactive')", "system.active_model_name||system.active_model||t('inactive')")
 
 
 MAX_REQUEST_BYTES = 64 * 1024 * 1024
@@ -124,11 +129,12 @@ class Handler(BaseHTTPRequestHandler):
                     "training": runtime.training_state(),
                     "models": runtime.list_models(),
                     "active_model": runtime.active_model_id,
+                    "active_model_name": runtime.active_model_name,
                     "loading": runtime.loading_state(),
                     "resources": runtime.system_state(),
                     "local_api_key": runtime.local_api_key,
                     "api_keys": runtime.list_api_keys(),
-                    "teacher_settings": runtime.teacher_settings(),
+                    "teacher_settings": runtime.public_teacher_settings(),
                 })
             elif path == "/api/training":
                 self._json(200, self.server.runtime.training_state())
@@ -144,6 +150,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.list_api_keys())
             elif path == "/api/community":
                 self._json(200, self.server.runtime.community.list())
+            elif path == "/api/conversations":
+                self._json(200, self.server.runtime.conversations.list())
+            elif path.startswith("/api/conversations/"):
+                self._json(200, self.server.runtime.conversations.get(path.split("/")[3]))
+            elif path == "/api/hub":
+                self._json(200, self.server.runtime.hub_settings())
+            elif path == "/api/hub/upload":
+                self._json(200, self.server.runtime.hub_upload_state())
+            elif path == "/api/update/check":
+                self._json(200, updater.as_dict(updater.check()))
             elif path.startswith("/api/community/export/"):
                 self._download_community(path.split("/")[4])
             elif path.startswith("/api/community/"):
@@ -207,12 +223,36 @@ class Handler(BaseHTTPRequestHandler):
                 ))
             elif path == "/api/community/dataset":
                 self._json(200, self.server.runtime.community.approved_dataset(str(data.get("project", ""))))
+            elif path == "/api/hub/login":
+                self._json(200, self.server.runtime.hub_login(data))
+            elif path == "/api/hub/register":
+                self._json(201, self.server.runtime.hub_login(data, register=True))
+            elif path == "/api/hub/logout":
+                self._json(200, self.server.runtime.hub_logout())
+            elif path == "/api/hub/upload":
+                self._json(202, self.server.runtime.start_hub_upload(str(data.get("model", ""))))
+            elif path == "/api/update/install":
+                info = updater.check()
+                if info.error:
+                    raise RuntimeError(info.error)
+                if not info.available:
+                    self._json(200, updater.as_dict(info))
+                    return
+                if not updater.schedule_install(info):
+                    raise RuntimeError("no update is available")
+                self._json(202, {**updater.as_dict(info), "status": "installing"})
+            elif path == "/api/conversations":
+                self._json(201, self.server.runtime.conversations.create())
             elif path == "/api/training/stop":
                 self._json(202, self.server.runtime.stop_training())
+            elif path == "/api/training/resume":
+                self._json(202, self.server.runtime.resume_pending_training())
             elif path == "/api/models/load":
                 self._json(202, self.server.runtime.start_load_model(str(data.get("model", ""))))
             elif path == "/api/models/unload":
                 self._json(200, self.server.runtime.unload_model())
+            elif path == "/api/models/delete":
+                self._json(200, self.server.runtime.delete_model(str(data.get("model", "")), str(data.get("confirmation", ""))))
             elif path == "/api/models/export":
                 result = self.server.runtime.export_model(str(data.get("model", "")), str(data.get("target", "server")))
                 result["download"] = f"/api/exports/{result['filename']}"
@@ -228,6 +268,9 @@ class Handler(BaseHTTPRequestHandler):
                     int(data.get("max_tokens", 128)),
                     float(data.get("temperature", 0.8)),
                 )
+                conversation_id = str(data.get("conversation_id", ""))
+                if conversation_id:
+                    self.server.runtime.conversations.append_exchange(conversation_id, str(data.get("prompt", "")), str(result.get("content", "")))
                 self._json(200, result)
             elif path == "/v1/chat/completions":
                 if not self._require_api_key(str(data.get("model", "")) or None):
@@ -401,6 +444,8 @@ def _existing_server(url: str) -> bool:
 
 
 def main() -> None:
+    from .process_name import set_orbit_process_name
+    set_orbit_process_name("Orbit Local AI")
     parser = argparse.ArgumentParser(description="Orbit local training, chat and OpenAI-compatible API")
     parser.add_argument("--host", default="127.0.0.1", help="default is local-only")
     parser.add_argument("--port", type=int, default=8765)

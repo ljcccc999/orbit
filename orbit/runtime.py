@@ -14,6 +14,8 @@ from typing import Any
 
 from .config import OrbitConfig
 from .community import CommunityStore
+from .conversations import ConversationStore
+from .hub import OrbitHubClient
 from .resources import memory_is_critical, require_checkpoint_load_capacity, require_training_capacity, resource_snapshot
 from .teacher import TeacherConfig, generate_dataset
 from .training_config import TrainingConfig
@@ -44,6 +46,10 @@ class OrbitRuntime:
         self.teacher_settings_path = self.data_root / "teacher-api.json"
         self._teacher_settings = self._load_teacher_settings()
         self.community = CommunityStore(self.data_root)
+        self.conversations = ConversationStore(self.data_root)
+        self.hub = OrbitHubClient(self.data_root)
+        self._hub_upload: dict[str, Any] = {"status": "idle", "progress": 0, "message": "尚未上传", "model": None}
+        self._pending_training: tuple[dict[str, Any], str, dict[str, int], str] | None = None
         self._state_lock = threading.RLock()
         self._model_lock = threading.RLock()
         self._stop_event = threading.Event()
@@ -150,6 +156,12 @@ class OrbitRuntime:
         with self._state_lock:
             return json.loads(json.dumps(self._teacher_settings))
 
+    def public_teacher_settings(self) -> dict[str, Any]:
+        settings = self.teacher_settings()
+        for profile in settings["profiles"].values():
+            profile["has_api_key"] = bool(profile.pop("api_key", ""))
+        return settings
+
     def save_teacher_profile(self, provider: str, base_url: str, model: str, api_key: str) -> dict[str, Any]:
         provider = provider.strip().lower()
         if provider not in {"deepseek", "custom"}:
@@ -159,10 +171,12 @@ class OrbitRuntime:
             raise ValueError("教师 API 配置无效")
         with self._state_lock:
             settings = self.teacher_settings()
+            if not values["api_key"]:
+                values["api_key"] = settings["profiles"][provider].get("api_key", "")
             settings["active_provider"] = provider
             settings["profiles"][provider] = values
             self._save_teacher_settings(settings)
-            return self.teacher_settings()
+            return self.public_teacher_settings()
 
     @property
     def local_api_key(self) -> str:
@@ -246,6 +260,9 @@ class OrbitRuntime:
         if device == "cpu":
             seq_len = min(seq_len, 1024)
         data_units = examples if bool(payload.get("assisted")) else max(1, text_chars // max(256, seq_len))
+        scale_examples = {"300m": 20, "1b": 36, "3b": 56, "7b": 72, "14b": 88, "38b": 100}[preset]
+        goal_chars = max(0, min(20_000, int(payload.get("goal_chars", 0))))
+        recommended_examples = min(100, scale_examples + min(20, goal_chars // 250))
         steps = max(100, min(2000, data_units * (20 if bool(payload.get("assisted")) else 8)))
         warmup = max(10, min(200, steps // 10))
         checkpoint_every = max(25, min(250, steps // 5))
@@ -264,6 +281,7 @@ class OrbitRuntime:
             "reason": "local_memory" if not feasible else "balanced_for_device_and_data",
             "required_memory_gb": round(required, 1),
             "available_memory_gb": round(available, 1),
+            "recommended_examples": recommended_examples,
             "config": config.__dict__,
         }
 
@@ -278,7 +296,13 @@ class OrbitRuntime:
 
     def training_state(self) -> dict[str, Any]:
         with self._state_lock:
-            return dict(self._training)
+            state = dict(self._training)
+        started = float(state.pop("_started_monotonic", 0) or 0)
+        elapsed = max(0.0, time.monotonic() - started) if started else 0.0
+        state["elapsed_seconds"] = round(elapsed)
+        step, steps = int(state.get("step", 0) or 0), int(state.get("steps", 0) or 0)
+        state["eta_seconds"] = round(elapsed / step * (steps - step)) if started and step > 0 and steps > step else None
+        return state
 
     def loading_state(self) -> dict[str, Any]:
         with self._state_lock:
@@ -414,7 +438,7 @@ class OrbitRuntime:
         if self._work_thread and self._work_thread.is_alive():
             raise RuntimeError("已经有一个训练或数据生成任务正在运行")
 
-    def _prepare_training(self, payload: dict[str, Any], text: str) -> tuple[str, TrainingConfig, Path, str, str | None]:
+    def _prepare_training(self, payload: dict[str, Any], text: str) -> tuple[str, TrainingConfig, Path, str, str, str | None]:
         preset = str(payload.get("preset", "300m")).lower()
         if preset not in PRESETS and preset != "local":
             raise ValueError("不支持的模型规模")
@@ -432,16 +456,17 @@ class OrbitRuntime:
             if parent_preset and parent_preset != preset:
                 raise ValueError(f"二次训练必须保持父模型规模：请选择 {parent_preset.upper()}")
         fallback = f"orbit-{preset}-{stamp}"
-        model_id = self._safe_model_name(str(payload.get("model_name", "")), fallback)
+        display_name = self._safe_model_name(str(payload.get("model_name", "")), fallback)
+        model_id = display_name
         checkpoint = self.models_root / f"{model_id}.pt"
         if checkpoint.exists():
             model_id = f"{model_id}-{stamp}"
             checkpoint = self.models_root / f"{model_id}.pt"
-        return preset, train_cfg, checkpoint, model_id, parent_model
+        return preset, train_cfg, checkpoint, model_id, display_name, parent_model
 
     def _run_local_training(self, payload: dict[str, Any], text: str) -> None:
         self.unload_model()
-        preset, train_cfg, checkpoint, model_id, parent_model = self._prepare_training(payload, text)
+        preset, train_cfg, checkpoint, model_id, display_name, parent_model = self._prepare_training(payload, text)
         requested_device = str(payload.get("device", "auto"))
         stamp = time.strftime("%Y%m%d-%H%M%S")
         dataset = Path(str(payload.get("_dataset_path", ""))) if payload.get("_dataset_path") else self.datasets_root / f"training-input-{stamp}.txt"
@@ -453,7 +478,7 @@ class OrbitRuntime:
         cfg = OrbitConfig.for_preset(preset)
         run = {
             "id": run_id, "status": "running", "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "completed_at": None, "model_id": model_id, "model_name": model_id,
+            "completed_at": None, "model_id": model_id, "model_name": display_name,
             "preset": preset, "parameters": cfg.estimate_parameters(), "parent_model": parent_model,
             "assisted": bool(payload.get("_assisted")), "training_goal": str(payload.get("instruction", "")),
             "dataset": str(dataset), "training_config": train_cfg.__dict__, "device": requested_device,
@@ -462,7 +487,8 @@ class OrbitRuntime:
         }
         self._save_run(run)
         metadata = {
-            "name": model_id, "preset": preset, "parameters": cfg.estimate_parameters(),
+            "name": display_name, "display_name": display_name, "model_id": model_id,
+            "preset": preset, "parameters": cfg.estimate_parameters(),
             "identity": "Orbit", "system_prompt": ORBIT_IDENTITY, "parent_model": parent_model,
             "training_runs": [run_id], "architecture": "orbit-hybrid-moe-v1", "ollama_ready": False,
             "created_at": run["created_at"],
@@ -480,9 +506,10 @@ class OrbitRuntime:
         with self._state_lock:
             self._training.update(
                 status="running", step=0, steps=train_cfg.steps, loss=None,
-                message=f"正在启动隔离训练进程：{preset}", model_id=model_id,
+                message=f"正在启动隔离训练进程：{preset}", model_id=model_id, model_name=display_name,
                 checkpoint=str(checkpoint), device=requested_device, phase="training",
                 dataset=str(dataset), run_id=run_id, parent_model=parent_model,
+                _started_monotonic=time.monotonic(),
             )
         log_path = self.data_root / "logs" / "training-worker.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -576,7 +603,9 @@ class OrbitRuntime:
     def start_auto_training(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("acknowledge_cost") is not True:
             raise ValueError("请先确认训练目标会发送给所选 AI API，且提供商可能收取费用")
-        api_key = str(payload.get("api_key", "")).strip()
+        provider = str(payload.get("teacher_provider", "deepseek")).strip().lower()
+        stored_profile = self.teacher_settings().get("profiles", {}).get(provider, {})
+        api_key = str(payload.get("api_key", "")).strip() or str(stored_profile.get("api_key", "")).strip()
         teacher = TeacherConfig(
             base_url=str(payload.get("teacher_base_url", "https://api.deepseek.com")),
             model=str(payload.get("teacher_model", "deepseek-v4-flash")),
@@ -588,7 +617,6 @@ class OrbitRuntime:
         self._training_config(payload)
         if not api_key or "\n" in api_key or len(api_key) > 1000:
             raise ValueError("请填写有效的 API Key")
-        provider = str(payload.get("teacher_provider", "deepseek"))
         self.save_teacher_profile(provider, teacher.base_url, teacher.model, api_key)
         with self._state_lock:
             self._assert_idle()
@@ -598,6 +626,7 @@ class OrbitRuntime:
                 "status": "generating", "phase": "generation", "step": 0, "steps": teacher.examples,
                 "loss": None, "message": "正在调用教师 API 生成训练样本", "model_id": None,
                 "teacher_model": teacher.model,
+                "_started_monotonic": time.monotonic(),
             }
 
         def generated(current: int, total: int) -> None:
@@ -615,9 +644,22 @@ class OrbitRuntime:
                 temporary.write_text(text, encoding="utf-8")
                 os.replace(temporary, dataset)
                 with self._state_lock:
-                    self._training.update(message="样本生成完成，正在启动本机训练", usage=usage, dataset=str(dataset))
+                    self._training.update(status="waiting_memory", message="样本已保存，正在等待足够的安全训练内存", usage=usage, dataset=str(dataset))
                 payload["_dataset_path"] = str(dataset)
                 payload["_assisted"] = True
+                preset = str(payload.get("preset", "300m")).lower()
+                required = OrbitConfig.for_preset(preset).estimated_training_memory_gb()
+                available = float(resource_snapshot(self.data_root).get("memory_available_gb", 0) or 0)
+                if required > max(0.0, available - 2.0):
+                    with self._state_lock:
+                        self._pending_training = (dict(payload), text, usage, str(dataset))
+                        self._training.update(
+                            status="needs_memory",
+                            message=f"内存不足，训练没有卡住：样本已保存。训练需要约 {required:.1f}GB，当前可用 {available:.1f}GB；释放内存后点击“重新检测并训练”",
+                        )
+                    return
+                with self._state_lock:
+                    self._training.update(status="preparing", message="内存已满足要求，正在启动本机训练")
                 self._run_local_training(payload, text)
                 with self._state_lock:
                     self._training.update(usage=usage, dataset=str(dataset))
@@ -631,6 +673,91 @@ class OrbitRuntime:
         self._work_thread = threading.Thread(target=worker, name="orbit-auto-training", daemon=True)
         self._work_thread.start()
         return self.training_state()
+
+    def resume_pending_training(self) -> dict[str, Any]:
+        with self._state_lock:
+            pending = self._pending_training
+            if not pending:
+                raise RuntimeError("没有等待继续的 AI 辅助训练")
+            payload, text, usage, dataset = pending
+            preset = str(payload.get("preset", "300m")).lower()
+            required = OrbitConfig.for_preset(preset).estimated_training_memory_gb()
+            available = float(resource_snapshot(self.data_root).get("memory_available_gb", 0) or 0)
+            if required > max(0.0, available - 2.0):
+                raise RuntimeError(f"内存仍不足：训练约需 {required:.1f}GB，当前可用 {available:.1f}GB，并需保留 2GB 给系统")
+            self._assert_idle()
+            self._pending_training = None
+            self._stop_event.clear()
+            self._training.update(status="preparing", message="内存已满足要求，正在继续训练")
+
+        def worker() -> None:
+            try:
+                self._run_local_training(payload, text)
+                with self._state_lock:
+                    self._training.update(usage=usage, dataset=dataset)
+            except Exception as exc:
+                with self._state_lock:
+                    self._training.update(status="failed", message=str(exc))
+
+        self._work_thread = threading.Thread(target=worker, name="orbit-resumed-training", daemon=True)
+        self._work_thread.start()
+        return self.training_state()
+
+    def hub_settings(self) -> dict[str, Any]:
+        return self.hub.public_settings()
+
+    def hub_login(self, payload: dict[str, Any], *, register: bool = False) -> dict[str, Any]:
+        return self.hub.authenticate(str(payload.get("url", "")), str(payload.get("email", "")), str(payload.get("password", "")), register=register)
+
+    def hub_logout(self) -> dict[str, Any]:
+        return self.hub.logout()
+
+    def hub_upload_state(self) -> dict[str, Any]:
+        with self._state_lock:
+            return dict(self._hub_upload)
+
+    def start_hub_upload(self, model_id: str) -> dict[str, Any]:
+        checkpoint = self._checkpoint_for(model_id)
+        metadata = self._model_metadata(model_id)
+        with self._state_lock:
+            if self._hub_upload.get("status") in {"hashing", "uploading"}:
+                raise RuntimeError("已有模型正在上传")
+            self._hub_upload = {"status": "hashing", "progress": 0, "message": "正在准备模型", "model": model_id}
+
+        def progress(current: int, total: int, message: str) -> None:
+            with self._state_lock:
+                self._hub_upload.update(
+                    status="uploading" if "上传" in message else "hashing",
+                    progress=round(current / max(1, total) * 100, 1), message=message,
+                )
+
+        def worker() -> None:
+            try:
+                result = self.hub.upload_model(checkpoint, metadata, progress)
+                with self._state_lock:
+                    self._hub_upload.update(status="pending_review", progress=100, message="上传完成，等待管理员审核", result=result)
+            except Exception as exc:
+                with self._state_lock:
+                    self._hub_upload.update(status="failed", message=str(exc))
+
+        threading.Thread(target=worker, name="orbit-hub-upload", daemon=True).start()
+        return self.hub_upload_state()
+
+    def delete_model(self, model_id: str, confirmation: str) -> dict[str, Any]:
+        checkpoint = self._checkpoint_for(model_id)
+        if confirmation != model_id:
+            raise ValueError("删除确认必须与模型名称完全一致")
+        with self._state_lock:
+            if self._hub_upload.get("model") == model_id and self._hub_upload.get("status") in {"hashing", "uploading"}:
+                raise RuntimeError("模型正在上传，暂时不能删除")
+        if self.active_model_id == model_id:
+            self.unload_model()
+        removed: list[str] = []
+        for path in (checkpoint, self._metadata_path(model_id), self.models_root / f"{model_id}.gguf"):
+            if path.is_file():
+                path.unlink()
+                removed.append(path.name)
+        return {"status": "deleted", "model": model_id, "removed": removed, "training_history_preserved": True}
 
     def stop_training(self) -> dict[str, Any]:
         with self._state_lock:
@@ -710,6 +837,13 @@ class OrbitRuntime:
         with self._model_lock:
             previous = self._model_id
             process = self._model
+            released_bytes = 0
+            if process is not None and process.poll() is None:
+                try:
+                    import psutil
+                    released_bytes = psutil.Process(process.pid).memory_info().rss
+                except (ImportError, psutil.Error):
+                    pass
             self._model = None
             self._model_id = None
             self._model_device = "cpu"
@@ -728,7 +862,11 @@ class OrbitRuntime:
                         process.kill()
         self._release_memory()
         self._set_loading("idle", 0, "模型权重已从内存卸载", None)
-        return {"status": "unloaded", "previous_model": previous}
+        return {
+            "status": "unloaded" if previous else "already_unloaded",
+            "previous_model": previous, "released_bytes": released_bytes,
+            "memory_available_gb": resource_snapshot(self.data_root).get("memory_available_gb"),
+        }
 
     def _idle_janitor(self) -> None:
         while True:
@@ -750,8 +888,10 @@ class OrbitRuntime:
         normalized = prompt.casefold()
         if any(phrase in normalized for phrase in identity_phrases):
             resolved_model = model_id or self.active_model_id or (self.list_models()[0]["id"] if self.list_models() else "orbit")
+            resolved_name = self._model_metadata(resolved_model).get("name", resolved_model) if resolved_model != "orbit" else "Orbit"
             return {
                 "model": resolved_model,
+                "model_name": resolved_name,
                 "content": "我是 Orbit，一个在本机运行、由用户训练的 AI。当前模型可以使用自定义名称，但我的产品身份始终是 Orbit。",
             }
         if model_id:
@@ -779,7 +919,8 @@ class OrbitRuntime:
             if response.get("type") != "result":
                 raise RuntimeError(str(response.get("error", "模型生成失败")))
             self._last_model_use = time.monotonic()
-            return {"model": self._model_id, "content": str(response.get("content", ""))}
+            metadata = self._model_metadata(str(self._model_id))
+            return {"model": self._model_id, "model_name": metadata.get("name", self._model_id), "content": str(response.get("content", ""))}
 
     def export_model(self, model_id: str, target: str) -> dict[str, Any]:
         checkpoint = self._checkpoint_for(model_id)
@@ -794,3 +935,10 @@ class OrbitRuntime:
     @property
     def active_model_id(self) -> str | None:
         return self._model_id if self._model is not None and self._model.poll() is None else None
+
+    @property
+    def active_model_name(self) -> str | None:
+        model_id = self.active_model_id
+        if not model_id:
+            return None
+        return str(self._model_metadata(model_id).get("name", model_id))

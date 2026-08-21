@@ -1,0 +1,32 @@
+services:
+  hub:
+    build: .
+    restart: unless-stopped
+    environment:
+      ORBIT_HUB_DATA: /data
+      ORBIT_COOKIE_SECURE: "1"
+      ORBIT_OPEN_REGISTRATION: "1"
+      ORBIT_MAX_UPLOAD_BYTES: ${ORBIT_MAX_UPLOAD_BYTES:-10737418240}
+      ORBIT_MAX_TOTAL_BYTES: ${ORBIT_MAX_TOTAL_BYTES:-42949672960}
+    volumes:
+      - orbit-hub-data:/data
+    expose:
+      - "8080"
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      ORBIT_DOMAIN: ${ORBIT_DOMAIN:?Set ORBIT_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - hub
+volumes:
+  orbit-hub-data:
+  caddy-data:
+  caddy-config:

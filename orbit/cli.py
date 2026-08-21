@@ -6,6 +6,7 @@ import urllib.request
 import webbrowser
 
 from . import service
+from . import updater
 
 
 def _post(path: str, payload: dict) -> dict:
@@ -28,6 +29,8 @@ def main() -> None:
     commands.add_parser("status", help="show background API status")
     commands.add_parser("logs", help="show log file locations")
     commands.add_parser("unload", help="release the active model from memory")
+    update = commands.add_parser("update", help="check for and install the latest Orbit runtime")
+    update.add_argument("--check", action="store_true", help="only check for a newer release")
     chat = commands.add_parser("chat", help="send one message without opening the web interface")
     chat.add_argument("message")
     chat.add_argument("--model")
@@ -56,6 +59,14 @@ def main() -> None:
     elif args.command == "unload":
         service.ensure_running()
         print(json.dumps(_post("/api/models/unload", {}), ensure_ascii=False))
+    elif args.command == "update":
+        info = updater.check()
+        print(json.dumps(updater.as_dict(info), ensure_ascii=False))
+        if info.error or args.check or not info.available:
+            return
+        service.stop()
+        code = updater.install_latest(info)
+        raise SystemExit(code)
     elif args.command == "chat":
         service.ensure_running()
         payload = {"prompt": args.message}

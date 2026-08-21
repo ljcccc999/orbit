@@ -12,6 +12,8 @@ def send(payload: dict) -> None:
 
 
 def main() -> None:
+    from .process_name import set_orbit_process_name
+    set_orbit_process_name("Orbit Model")
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
     args = parser.parse_args()

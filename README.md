@@ -25,6 +25,7 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Automatically tunes advanced parameters for the selected model size, device, available memory, and amount of local or teacher-generated data. Unsafe local configurations are blocked before allocation and the UI recommends a remote GPU bundle.
 - Saves locally trained checkpoints under `~/.orbit/models`.
 - Supports custom model names, secondary training from an existing checkpoint, parent-model lineage, and inspectable content/configuration for every training run.
+- Keeps the user's custom display name separate from the internal unique checkpoint ID, so timestamp suffixes never replace the name shown in Orbit.
 - Preserves the Orbit product identity independently of a user's custom model name, including before the first model is trained and in exported server packages.
 - Creates self-contained training bundles for CUDA GPU servers.
 - Exports a trained model as a portable Orbit server with the OpenAI-compatible API. An Ollama package can also be generated when a compatible same-name GGUF file is present.
@@ -46,6 +47,8 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 Download the current [macOS universal app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-macOS-universal.zip), [Windows x64 app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-x64.exe), [Windows ARM64 app](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-arm64.exe), [Linux x64 AppImage](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Linux-x64.AppImage), or [Linux ARM64 AppImage](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Linux-arm64.AppImage). Open the app and it prepares the local runtime without opening a terminal.
 
 After the first launch, Orbit starts with the user's login. Closing or minimizing the window leaves Orbit in the macOS menu bar, Windows notification area, or Linux system tray and keeps the local API available. Choose **Quit Orbit** from that menu to stop the API and disable automatic startup; manually opening Orbit again re-enables it.
+
+The **Check for updates** control inside Orbit checks the official release channel and can update the local Orbit runtime from inside the app. The service restarts automatically after an update; models, conversations, API keys, and training history remain in the user's local data directory.
 
 The current public builds are not Developer ID/Authenticode signed or notarized. macOS Gatekeeper or Windows SmartScreen may therefore require an explicit first-open confirmation. Removing that system warning requires platform signing certificates; it is not something application code can safely bypass.
 
@@ -101,6 +104,10 @@ The **Community** page lets anyone write an idea, factual source, or dialogue ex
 This workflow does not claim that automatic screening can prove content true or legal. The final reviewer remains responsible for source, rights, privacy, and policy checks, and flagged content cannot be directly approved. Orbit currently exchanges portable packages; it does not silently upload contributions to a central server.
 
 See the bilingual [Community Contribution Policy](COMMUNITY_POLICY.md) for the full review flow and official references.
+
+## Optional Orbit Hub
+
+`server/` contains an optional small-server Hub for accounts, administrator review, and finished-model uploads. The Hub does not train, load, execute, or inspect uploaded model files. Users train locally, then choose whether to upload a finished checkpoint for administrator review or contribute a portable content package. See [server/README.md](server/README.md) for deployment and security boundaries.
 
 The 300M–38B choices describe architecture sizes; they are not pretrained model downloads. Training a useful foundation model from scratch requires a large, carefully prepared dataset and substantial compute.
 
@@ -167,16 +174,11 @@ The API follows the OpenAI request and response shapes for model listing, non-st
 
 Orbit does not upload local training text, checkpoints, or chat messages. Users explicitly move a remote training bundle if they choose to train on another machine.
 
-## Development
+## Private development workspace
 
-```bash
-git clone https://github.com/ljcccc999/orbit.git
-cd orbit
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/python -m pytest -q
-.venv/bin/orbit
-```
+Invited developers participate only through the private Orbit project workspace for implementation, review, and testing. The workspace address and access are provided separately by the project owner.
+
+This public GitHub page is not a developer entry point. Developers do not receive access to the GitHub repository, repository secrets, deploy keys, collaborators, GitHub Apps, or release permissions. Changes are reviewed and explicitly accepted by the project owner before publication.
 
 ## License
 

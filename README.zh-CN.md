@@ -25,6 +25,7 @@ Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对�
 - 根据模型规模、训练设备、当前可用内存以及本机或教师样本的数据量自动调整高级训练参数；本机无法安全完成的配置会在分配内存前阻止启动，并建议生成远程 GPU 任务包。
 - 将本机训练的 checkpoint 保存在 `~/.orbit/models`。
 - 支持自定义模型名、从已有 checkpoint 二次训练、父模型血缘，以及查看每次训练的原文、参数和结果。
+- 用户自定义的显示名称与 checkpoint 的内部唯一 ID 分开保存，即使文件名需要加时间戳后缀，Orbit 界面也不会把后缀编号当成模型名称。
 - Orbit 身份独立于用户自定义模型名；即使还没训练模型也知道自己是 Orbit，服务器导出包也会保留这个身份。
 - 为 CUDA GPU 服务器生成自包含训练任务包。
 - 可把训练模型导出为带 OpenAI 兼容 API 的便携 Orbit 服务器；存在兼容的同名 GGUF 时也可生成 Ollama 包。
@@ -46,6 +47,8 @@ Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对�
 下载最新的 [macOS 通用 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-macOS-universal.zip)、[Windows x64 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-x64.exe)、[Windows ARM64 App](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Windows-arm64.exe)、[Linux x64 AppImage](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Linux-x64.AppImage) 或 [Linux ARM64 AppImage](https://github.com/ljcccc999/orbit/releases/latest/download/Orbit-Linux-arm64.AppImage)。双击 App 后会在图形界面中自动准备本机运行时，不需要打开命令行。
 
 首次启动后，Orbit 会随用户登录自动运行。关闭或最小化窗口时，Orbit 会继续留在 macOS 右上角菜单栏、Windows 通知区域或 Linux 系统托盘中，本地 API 保持可用。只有从该菜单选择“退出 Orbit”，才会停止 API 并取消自动启动；以后手动打开 Orbit 会重新启用。
+
+Orbit 内部的“检查更新”按钮会检查官方 Release，并直接在 App 内更新 Orbit 本地运行时。更新后本机会自动重启服务；模型、对话、API Key 和训练历史仍保留在用户自己的数据目录中。
 
 当前公开构建还没有 Developer ID/Authenticode 正式签名和公证，因此 macOS Gatekeeper 或 Windows SmartScreen 在首次打开时可能要求用户明确确认。彻底去掉系统提示需要对应平台的代码签名证书，程序代码不能安全绕过。
 
@@ -101,6 +104,10 @@ macOS LaunchAgent 和 Linux 用户级 systemd 服务会在 Orbit 异常退出后
 自动筛查不能证明内容一定真实、合法。最终审核人仍需检查来源、内容权利、隐私和规则；被机器标记的内容不能直接批准。当前版本通过便携贡献包协作，不会在后台把内容静默上传到中心服务器。
 
 完整审核流程与官方参考资料见双语 [协作贡献政策](COMMUNITY_POLICY.md)。
+
+## 可选 Orbit Hub
+
+`server/` 提供一个可选的小型服务器 Hub，用于账号、管理员审核和已完成模型上传。Hub 不训练、不加载、不执行，也不会解析上传的模型文件。用户先在本机训练，再自行选择上传完成的 checkpoint 等待管理员审核，或提交便携内容贡献包。部署方式和安全边界见 [server/README.md](server/README.md)。
 
 300M–38B 表示架构规模，不是已经预训练好的模型下载。要从零训练出真正可用的基础模型，需要大量经过认真处理的数据和可观的算力。
 
@@ -167,16 +174,11 @@ API 按 OpenAI 的模型列表、非流式 Chat Completions 和非流式 Respons
 
 Orbit 不会上传本地训练文本、checkpoint 或聊天消息。只有用户选择在另一台机器训练时，才会主动移动远程训练任务包。
 
-## 开发
+## 私有开发协作空间
 
-```bash
-git clone https://github.com/ljcccc999/orbit.git
-cd orbit
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/python -m pytest -q
-.venv/bin/orbit
-```
+受邀请的开发者只能通过独立的 Orbit 项目协作空间参与开发、审核和测试。协作空间地址和访问权限由项目所有者另行提供。
+
+这个公开 GitHub 页面不是开发者入口。开发者不会获得 GitHub 仓库、仓库 Secrets、Deploy Key、协作者、GitHub App 或 Release 权限。任何改动都必须经过项目所有者审核并明确接受后，才能发布。
 
 ## 许可证
 

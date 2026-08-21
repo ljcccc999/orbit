@@ -81,7 +81,8 @@ def test_http_health_models_and_openai_chat(tmp_path):
         )
         with urllib.request.urlopen(teacher_request) as response:
             teacher = json.loads(response.read())
-            assert teacher["profiles"]["custom"]["api_key"] == "teacher-secret"
+            assert teacher["profiles"]["custom"]["has_api_key"] is True
+            assert "api_key" not in teacher["profiles"]["custom"]
         recommend_request = urllib.request.Request(
             base + "/api/training/recommendation",
             data=json.dumps({"preset": "300m", "device": "cpu", "text_chars": 2000}).encode(),

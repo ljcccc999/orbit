@@ -90,7 +90,13 @@ def run_training(
                 f"本机约 {memory['system_gb']:.1f}GB；请降低模型档位或更换设备。"
             )
     model = OrbitForCausalLM(cfg).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=train_cfg.learning_rate, weight_decay=train_cfg.weight_decay)
+    # foreach=False avoids temporary tensor-list allocations that can create large
+    # peak-memory spikes on consumer machines. The runtime guard still stops safely
+    # if system memory approaches the configured floor.
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=train_cfg.learning_rate,
+        weight_decay=train_cfg.weight_decay, foreach=False,
+    )
     total_steps = max(train_cfg.steps, 1)
     def lr_lambda(step):
         if step < train_cfg.warmup_steps:
