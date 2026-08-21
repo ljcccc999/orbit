@@ -20,6 +20,8 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Keeps a native menu-bar or system-tray controller running when its window is closed; only **Quit Orbit** stops the local service.
 - Loads weights on demand and automatically unloads an idle model after five minutes.
 - Can use DeepSeek or another OpenAI-compatible API to generate a parameter-aware supervised dataset and then start local training. Each provider keeps its own local model, URL, and API key; replacing one key does not affect another provider.
+- Supports Chinese, English, or balanced bilingual training data.
+- Creates portable community contribution packages for shared models. Contributions are quarantined or held for review and cannot enter a dataset until a local human reviewer approves them.
 - Automatically tunes advanced parameters for the selected model size, device, available memory, and amount of local or teacher-generated data. Unsafe local configurations are blocked before allocation and the UI recommends a remote GPU bundle.
 - Saves locally trained checkpoints under `~/.orbit/models`.
 - Supports custom model names, secondary training from an existing checkpoint, parent-model lineage, and inspectable content/configuration for every training run.
@@ -92,6 +94,14 @@ Open the **Training** page, choose a preset, optionally name the model or select
 
 Every actual training run writes an inspectable record under `~/.orbit/training-runs`, including the exact dataset, parameters, status, loss, result, model name, and parent model. Selecting **Train again** creates a new checkpoint and a fresh optimizer instead of overwriting the parent.
 
+## Collaborative training
+
+The **Community** page lets anyone write an idea, factual source, or dialogue example and export it as an `.orbit-contribution.zip` package. Another user can import the package into a local review queue. Machine pre-screening can quarantine obvious dangerous instructions or personal information; factual material requires an HTTPS source and explicit reviewer verification. Only approved contributions can be assembled into training text.
+
+This workflow does not claim that automatic screening can prove content true or legal. The final reviewer remains responsible for source, rights, privacy, and policy checks, and flagged content cannot be directly approved. Orbit currently exchanges portable packages; it does not silently upload contributions to a central server.
+
+See the bilingual [Community Contribution Policy](COMMUNITY_POLICY.md) for the full review flow and official references.
+
 The 300M–38B choices describe architecture sizes; they are not pretrained model downloads. Training a useful foundation model from scratch requires a large, carefully prepared dataset and substantial compute.
 
 ## Chat locally
@@ -152,6 +162,7 @@ The API follows the OpenAI request and response shapes for model listing, non-st
 | Portable model exports | `~/.orbit/exports` |
 | Random API keys | `~/.orbit/api-keys.json` |
 | Saved teacher API settings | `~/.orbit/teacher-api.json` |
+| Community contributions and review records | `~/.orbit/community` |
 | Isolated Python runtime | `~/.orbit/runtime` |
 
 Orbit does not upload local training text, checkpoints, or chat messages. Users explicitly move a remote training bundle if they choose to train on another machine.

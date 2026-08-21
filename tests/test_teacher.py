@@ -16,7 +16,7 @@ def test_teacher_generation_tracks_progress_and_usage(monkeypatch):
     monkeypatch.setattr(teacher, "_request", fake_request)
     progress = []
     text, usage = teacher.generate_dataset(
-        teacher.TeacherConfig(instruction="Teach carefully", examples=6, model_profile={"preset": "1b", "parameters": 1_063_000_000}),
+        teacher.TeacherConfig(instruction="Teach carefully", examples=6, language="bilingual", model_profile={"preset": "1b", "parameters": 1_063_000_000}),
         "secret", threading.Event(), lambda current, total: progress.append((current, total)),
     )
     assert "<|assistant|>A" in text
@@ -25,6 +25,8 @@ def test_teacher_generation_tracks_progress_and_usage(monkeypatch):
     assert all(call[1] == "secret" for call in calls)
     assert all(call[2]["model"] == "deepseek-v4-flash" for call in calls)
     assert "1063000000" in calls[0][2]["messages"][1]["content"]
+    assert "简体中文" in calls[0][2]["messages"][1]["content"]
+    assert "英语双语" in calls[0][2]["messages"][1]["content"]
 
 
 def test_teacher_rejects_insecure_remote_http():

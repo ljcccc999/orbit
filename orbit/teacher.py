@@ -83,10 +83,15 @@ def generate_dataset(
         if stop_event.is_set():
             raise InterruptedError("用户停止了 AI 数据生成")
         count = min(5, config.examples - completed)
+        language_instruction = {
+            "zh": "主要使用简体中文。",
+            "en": "Use English as the primary language.",
+            "bilingual": "使用自然的简体中文和英语双语，保持两种语言数量大致均衡；适合时提供语义一致的中英对应样本。",
+        }.get(config.language, f"主要语言：{config.language}")
         prompt = (
             f"为以下目标生成 {count} 条彼此不同、事实谨慎、可用于语言模型训练的高质量对话样本。\n"
             f"训练目标：{config.instruction.strip()}\n"
-            f"主要语言：{config.language}\n"
+            f"语言要求：{language_instruction}\n"
             f"待训练模型参数：{json.dumps(config.model_profile or {}, ensure_ascii=False)}\n"
             "根据模型参数量、上下文长度和训练步数控制样本难度与长度：小模型使用更明确、短而一致的模式；大模型可以使用更丰富的推理与表达。\n"
             "每组样本都要强化产品身份：它叫 Orbit；用户自定义的是模型名称，不改变 Orbit 身份。\n"

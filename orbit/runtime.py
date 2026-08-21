@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import OrbitConfig
+from .community import CommunityStore
 from .resources import memory_is_critical, require_checkpoint_load_capacity, require_training_capacity, resource_snapshot
 from .teacher import TeacherConfig, generate_dataset
 from .training_config import TrainingConfig
@@ -42,6 +43,7 @@ class OrbitRuntime:
         self._api_keys = self._load_or_create_api_keys()
         self.teacher_settings_path = self.data_root / "teacher-api.json"
         self._teacher_settings = self._load_teacher_settings()
+        self.community = CommunityStore(self.data_root)
         self._state_lock = threading.RLock()
         self._model_lock = threading.RLock()
         self._stop_event = threading.Event()
@@ -387,6 +389,13 @@ class OrbitRuntime:
         config.validate()
         return config
 
+    @staticmethod
+    def _data_language(payload: dict[str, Any]) -> str:
+        language = str(payload.get("data_language", "bilingual"))
+        if language not in {"zh", "en", "bilingual"}:
+            raise ValueError("训练语言必须是中文、English 或中英双语")
+        return language
+
     def _teacher_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         preset = str(payload.get("preset", "300m")).lower()
         cfg = OrbitConfig.for_preset(preset)
@@ -398,6 +407,7 @@ class OrbitRuntime:
             "training_steps": train_cfg.steps,
             "base_model": str(payload.get("base_model", "")).strip() or None,
             "model_name": str(payload.get("model_name", "")).strip() or None,
+            "data_language": self._data_language(payload),
         }
 
     def _assert_idle(self) -> None:
@@ -409,6 +419,7 @@ class OrbitRuntime:
         if preset not in PRESETS and preset != "local":
             raise ValueError("不支持的模型规模")
         train_cfg = self._training_config(payload)
+        self._data_language(payload)
         if len(text.encode("utf-8")) < train_cfg.seq_len + 2:
             raise ValueError("训练文本长度必须大于序列长度")
         cfg = OrbitConfig.for_preset(preset)
@@ -447,6 +458,7 @@ class OrbitRuntime:
             "assisted": bool(payload.get("_assisted")), "training_goal": str(payload.get("instruction", "")),
             "dataset": str(dataset), "training_config": train_cfg.__dict__, "device": requested_device,
             "step": 0, "steps": train_cfg.steps, "loss": None, "message": "正在启动训练",
+            "data_language": self._data_language(payload),
         }
         self._save_run(run)
         metadata = {

@@ -3,6 +3,7 @@ import threading
 import time
 import urllib.request
 import zipfile
+from pathlib import Path
 
 import torch
 
@@ -45,7 +46,19 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "serviceUnavailable:'Orbit 本地服务暂时不可用，正在重新连接…'" in PAGE
     assert 'id="newChat"' in PAGE
     assert 'data-i18n="examplesHelp"' in PAGE
+    assert 'id="teacherKey" type="password"' in PAGE
+    assert 'data-paste-enabled="true"' in PAGE
+    assert 'id="dataLanguage"' in PAGE
+    assert 'id="community" class="page"' in PAGE
+    assert "/api/community/submit" in PAGE
     assert "/api/training/recommendation" in PAGE
+
+
+def test_macos_desktop_exposes_standard_paste_command():
+    source = Path("desktop/macos/OrbitApp.swift").read_text(encoding="utf-8")
+    assert 'withTitle: "Paste"' in source
+    assert "#selector(NSText.paste(_:))" in source
+    assert "NSApp.mainMenu = main" in source
 
 
 def test_http_health_models_and_openai_chat(tmp_path):

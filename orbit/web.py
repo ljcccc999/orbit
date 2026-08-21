@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import socketserver
 import threading
@@ -141,6 +142,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.loading_state())
             elif path == "/api/keys":
                 self._json(200, self.server.runtime.list_api_keys())
+            elif path == "/api/community":
+                self._json(200, self.server.runtime.community.list())
+            elif path.startswith("/api/community/export/"):
+                self._download_community(path.split("/")[4])
+            elif path.startswith("/api/community/"):
+                self._json(200, self.server.runtime.community.get(path.split("/")[3]))
             elif path == "/api/jobs":
                 self._json(200, self._job_rows())
             elif path.startswith("/api/jobs/") and path.endswith("/download"):
@@ -183,6 +190,23 @@ class Handler(BaseHTTPRequestHandler):
                     str(data.get("provider", "")), str(data.get("base_url", "")),
                     str(data.get("model", "")), str(data.get("api_key", "")),
                 ))
+            elif path == "/api/community/submit":
+                self._json(201, self.server.runtime.community.submit(data))
+            elif path == "/api/community/import":
+                encoded = str(data.get("package", ""))
+                try:
+                    package = base64.b64decode(encoded, validate=True)
+                except ValueError as exc:
+                    raise ValueError("贡献包不是有效的 Base64 数据") from exc
+                self._json(201, self.server.runtime.community.import_package(package))
+            elif path == "/api/community/review":
+                self._json(200, self.server.runtime.community.review(
+                    str(data.get("id", "")), str(data.get("decision", "")),
+                    str(data.get("reviewer", "")), str(data.get("notes", "")),
+                    data.get("facts_verified") is True,
+                ))
+            elif path == "/api/community/dataset":
+                self._json(200, self.server.runtime.community.approved_dataset(str(data.get("project", ""))))
             elif path == "/api/training/stop":
                 self._json(202, self.server.runtime.stop_training())
             elif path == "/api/models/load":
@@ -256,6 +280,7 @@ class Handler(BaseHTTPRequestHandler):
             text,
             training_config=train_cfg,
             model_name=str(data.get("model_name", "orbit")),
+            data_language=str(data.get("data_language", "bilingual")),
         )
         job_id = zip_path.stem.removeprefix("orbit-training-")
         self._json(201, {
@@ -288,6 +313,16 @@ class Handler(BaseHTTPRequestHandler):
         if not archive.is_file():
             self._error(404, "export not found")
             return
+        data = archive.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{archive.name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _download_community(self, contribution_id: str) -> None:
+        archive = self.server.runtime.community.export(contribution_id)
         data = archive.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")

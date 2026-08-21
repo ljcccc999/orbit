@@ -16,6 +16,7 @@ def create_job_bundle(
     root: Path, preset: str, steps: int, batch_size: int, seq_len: int,
     learning_rate: float, text: str, name: str = "orbit-training",
     training_config: TrainingConfig | None = None, model_name: str = "orbit",
+    data_language: str = "bilingual",
 ) -> Path:
     """Create a portable remote-GPU training job without running it locally."""
     if preset not in {"local", "300m", "1b", "3b", "7b", "14b", "38b"}:
@@ -39,6 +40,7 @@ def create_job_bundle(
         "model_parameters": cfg.estimate_parameters(),
         "model_name": model_name,
         "identity": "Orbit",
+        "data_language": data_language,
         "training": train_cfg.__dict__,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
