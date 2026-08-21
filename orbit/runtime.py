@@ -66,6 +66,7 @@ class OrbitRuntime:
         self._model_device = "cpu"
         self._last_model_use = 0.0
         self._stop_reason = ""
+        self._delete_after_stop = False
         configured_idle = int(os.environ.get("ORBIT_MODEL_IDLE_SECONDS", "300"))
         self.idle_unload_seconds = max(10, idle_unload_seconds or configured_idle)
         self._training: dict[str, Any] = {
@@ -588,19 +589,25 @@ class OrbitRuntime:
                     message=(self._stop_reason or "训练已停止，已原子保存当前 checkpoint") if stopped else "训练完成，模型已保存在本机",
                 )
             run.update(
-                status="stopped" if stopped else "completed",
+                status="stopped_deleted" if stopped and self._delete_after_stop else ("stopped" if stopped else "completed"),
                 completed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 step=int(self._training.get("step", 0)), loss=self._training.get("loss"),
-                message=self._training.get("message"),
+                message=("训练已停止，未完成模型已删除" if stopped and self._delete_after_stop else self._training.get("message")),
             )
+            if stopped and self._delete_after_stop:
+                self._remove_model_files(model_id)
+                with self._state_lock:
+                    self._training.update(status="stopped_deleted", message="训练已停止，未完成模型已删除")
             self._save_run(run)
-            self._write_model_metadata(model_id, metadata)
+            if not (stopped and self._delete_after_stop):
+                self._write_model_metadata(model_id, metadata)
         except Exception as exc:
             run.update(status="failed", completed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"), message=str(exc))
             self._save_run(run)
             raise
         finally:
             self._training_process = None
+            self._delete_after_stop = False
             job_path.unlink(missing_ok=True)
 
     def start_training(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -610,6 +617,7 @@ class OrbitRuntime:
             self._assert_idle()
             self._stop_event.clear()
             self._stop_reason = ""
+            self._delete_after_stop = False
             self._training.update(status="preparing", step=0, message="正在检查内存、磁盘和训练配置", phase="preparing")
 
         def worker() -> None:
@@ -645,6 +653,7 @@ class OrbitRuntime:
             self._assert_idle()
             self._stop_event.clear()
             self._stop_reason = ""
+            self._delete_after_stop = False
             self._training = {
                 "status": "generating", "phase": "generation", "step": 0, "steps": teacher.examples,
                 "loss": None, "message": "正在调用教师 API 生成训练样本", "model_id": None,
@@ -766,6 +775,14 @@ class OrbitRuntime:
         threading.Thread(target=worker, name="orbit-hub-upload", daemon=True).start()
         return self.hub_upload_state()
 
+    def _remove_model_files(self, model_id: str) -> list[str]:
+        removed: list[str] = []
+        for path in (self.models_root / f"{model_id}.pt", self._metadata_path(model_id), self.models_root / f"{model_id}.gguf"):
+            if path.is_file():
+                path.unlink()
+                removed.append(path.name)
+        return removed
+
     def delete_model(self, model_id: str, confirmation: str) -> dict[str, Any]:
         checkpoint = self._checkpoint_for(model_id)
         if confirmation != model_id:
@@ -775,20 +792,20 @@ class OrbitRuntime:
                 raise RuntimeError("模型正在上传，暂时不能删除")
         if self.active_model_id == model_id:
             self.unload_model()
-        removed: list[str] = []
-        for path in (checkpoint, self._metadata_path(model_id), self.models_root / f"{model_id}.gguf"):
-            if path.is_file():
-                path.unlink()
-                removed.append(path.name)
+        removed = self._remove_model_files(model_id)
         return {"status": "deleted", "model": model_id, "removed": removed, "training_history_preserved": True}
 
-    def stop_training(self) -> dict[str, Any]:
+    def stop_training(self, delete_checkpoint: bool = False) -> dict[str, Any]:
         with self._state_lock:
             if not self._work_thread or not self._work_thread.is_alive():
                 raise RuntimeError("当前没有正在运行的训练或数据生成任务")
-            self._stop_reason = "用户已请求安全停止"
+            self._delete_after_stop = bool(delete_checkpoint)
+            self._stop_reason = "用户已请求停止并删除未完成模型" if delete_checkpoint else "用户已请求安全停止"
             self._stop_event.set()
-            self._training.update(status="stopping", message="正在安全停止；若已开始训练，将原子保存 checkpoint")
+            self._training.update(
+                status="stopping",
+                message=("正在停止；训练完成前生成的模型将被删除" if delete_checkpoint else "正在安全停止；若已开始训练，将原子保存 checkpoint"),
+            )
         return self.training_state()
 
     def _set_loading(self, status: str, progress: int, message: str, model_id: str | None) -> None:

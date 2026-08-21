@@ -77,6 +77,9 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "{capture:true,passive:false}" in PAGE
     assert "serviceUnavailable:'Orbit 本地服务暂时不可用，正在重新连接…'" in PAGE
     assert 'id="newChat"' in PAGE
+    assert 'id="stopDeleteTraining"' in PAGE
+    assert "/api/training/stop-delete" in PAGE
+    assert "stopped_deleted" in PAGE
     assert 'data-i18n="examplesHelp"' in PAGE
     assert 'id="teacherKey" type="password"' in PAGE
     assert 'data-paste-enabled="true"' in PAGE

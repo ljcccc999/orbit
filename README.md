@@ -97,6 +97,8 @@ Open the **Training** page, choose a preset, optionally name the model or select
 
 Every actual training run writes an inspectable record under `~/.orbit/training-runs`, including the exact dataset, parameters, status, loss, result, model name, and parent model. Selecting **Train again** creates a new checkpoint and a fresh optimizer instead of overwriting the parent.
 
+The Training page offers two stop actions: **Safe stop and keep checkpoint** preserves a resumable partial model, while **Stop and delete unfinished model** removes the incomplete checkpoint and metadata but keeps the training history.
+
 ## Collaborative training
 
 The **Community** page lets anyone write an idea, factual source, or dialogue example and export it as an `.orbit-contribution.zip` package. Another user can import the package into a local review queue. Machine pre-screening can quarantine obvious dangerous instructions or personal information; factual material requires an HTTPS source and explicit reviewer verification. Only approved contributions can be assembled into training text.

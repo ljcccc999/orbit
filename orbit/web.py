@@ -283,6 +283,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(201, self.server.runtime.conversations.create())
             elif path == "/api/training/stop":
                 self._json(202, self.server.runtime.stop_training())
+            elif path == "/api/training/stop-delete":
+                self._json(202, self.server.runtime.stop_training(delete_checkpoint=True))
             elif path == "/api/training/resume":
                 self._json(202, self.server.runtime.resume_pending_training())
             elif path == "/api/models/load":
