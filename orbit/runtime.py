@@ -4,6 +4,7 @@ import gc
 import json
 import os
 import re
+import select
 import secrets
 import shutil
 import subprocess
@@ -1516,6 +1517,19 @@ class OrbitRuntime:
                 "model_name": metadata.get("name", self._model_id),
             }, ensure_ascii=False) + "\n")
             self._model.stdin.flush()
+            readable, _, _ = select.select([self._model.stdout], [], [], 45.0)
+            if not readable:
+                process = self._model
+                self._model = None
+                self._model_id = None
+                self._model_device = "cpu"
+                try:
+                    process.kill()
+                    process.wait(timeout=2)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+                self._set_loading("idle", 0, "模型推理超时，已自动释放推理进程", None)
+                raise RuntimeError("本次回复超过 45 秒未返回，已自动释放模型；请重试或减少问题长度")
             line = self._model.stdout.readline()
             if not line:
                 raise RuntimeError("隔离推理进程意外退出")

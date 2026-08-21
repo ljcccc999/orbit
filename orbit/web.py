@@ -333,7 +333,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.runtime.chat(
                     str(data.get("prompt", "")),
                     str(data["model"]) if data.get("model") else None,
-                    int(data.get("max_tokens", 128)),
+                    min(8, int(data.get("max_tokens", 128))),
                     float(data.get("temperature", 0.8)),
                 )
                 conversation_id = str(data.get("conversation_id", ""))
@@ -463,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
         result = self.server.runtime.chat(
             prompt,
             str(data["model"]) if data.get("model") else None,
-            int(data.get("max_tokens", 128)),
+            min(48, int(data.get("max_tokens", 128))),
             float(data.get("temperature", 0.8)),
         )
         content = result["content"]
