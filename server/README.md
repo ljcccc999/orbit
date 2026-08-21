@@ -1,6 +1,6 @@
 # Orbit Hub
 
-Orbit Hub is an optional account, upload, and administrator-review service. It never trains, loads, or executes uploaded models. Existing Orbit installations continue to work locally when no Hub is configured.
+Orbit Hub is an optional account, upload, and administrator-review service. It receives finished models and GPU training packages that Orbit generates locally. It never trains, loads, or executes uploaded files automatically. Existing Orbit installations continue to work locally when no Hub is configured.
 
 ## Minimum practical server
 
@@ -27,7 +27,7 @@ Back up the named `orbit-hub-data` volume. It contains the SQLite database, pend
 - Passwords use Argon2id; plaintext passwords are never stored.
 - Sessions are random opaque values; browser sessions use Secure, HttpOnly, SameSite=Strict cookies and CSRF tokens.
 - Desktop clients may use an opaque bearer session stored in their local user-only Orbit configuration.
-- Uploads use fixed 8 MiB chunks, server quotas, extension allowlisting, random server-side names, final size/SHA-256 verification, and an administrator review gate.
+- Uploads use fixed 8 MiB chunks, server quotas, extension allowlisting, random server-side names, final size/SHA-256 verification, and an administrator review gate. The same verified `.zip` path is used for human-authored and AI-assisted GPU training packages.
 - Uploaded files are not parsed, extracted, imported, executed, or loaded by Hub.
 - Approval controls visibility; it does not prove a model is safe, lawful, accurate, or free of malicious behavior.
 - Put SSH behind key authentication and a firewall, keep Docker/the OS updated, and do not expose port 8080 directly.

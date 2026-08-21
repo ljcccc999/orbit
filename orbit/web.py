@@ -265,6 +265,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.hub_logout())
             elif path == "/api/hub/upload":
                 self._json(202, self.server.runtime.start_hub_upload(str(data.get("model", ""))))
+            elif path == "/api/hub/job-upload":
+                self._json(202, self.server.runtime.start_hub_job_upload(data))
             elif path == "/api/update/install":
                 info = updater.check()
                 if info.error:

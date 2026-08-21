@@ -125,3 +125,46 @@ class OrbitHubClient:
         result = self._request(f"/api/uploads/{created['id']}/complete", method="POST", payload={})
         progress(total, total, "上传完成，等待管理员审核")
         return result
+
+    def upload_training_bundle(self, bundle: Path, metadata: dict[str, Any], progress: Callable[[int, int, str], None]) -> dict[str, Any]:
+        """Upload a locally generated GPU training bundle to the user's Hub server.
+
+        The Hub already provides authenticated, chunked, checksum-verified ZIP
+        uploads. A training bundle uses the same path as a model package, but
+        is labeled explicitly so the server never executes it automatically.
+        """
+        if not self._config.get("token"):
+            raise RuntimeError("请先登录 Orbit Hub")
+        if bundle.suffix.lower() != ".zip":
+            raise ValueError("GPU 训练包必须是 ZIP 文件")
+        total = bundle.stat().st_size
+        digest = hashlib.sha256()
+        read = 0
+        with bundle.open("rb") as source:
+            while block := source.read(4 * 1024 * 1024):
+                digest.update(block)
+                read += len(block)
+                progress(read, total, "正在计算 GPU 训练包 SHA-256")
+        created = self._request("/api/uploads", method="POST", payload={
+            "name": metadata.get("name") or bundle.stem,
+            "filename": bundle.name,
+            "size": total,
+            "sha256": digest.hexdigest(),
+            "preset": metadata.get("preset", "custom"),
+            "parameters": int(metadata.get("parameters", 0) or 0),
+            "description": metadata.get(
+                "description",
+                "Locally generated Orbit GPU training bundle; awaiting administrator review.",
+            ),
+        })
+        chunk_size = int(created["chunk_size"])
+        sent = 0
+        with bundle.open("rb") as source:
+            for index in range(int(created["chunks"])):
+                block = source.read(chunk_size)
+                self._request(f"/api/uploads/{created['id']}/chunks/{index}", method="PUT", body=block)
+                sent += len(block)
+                progress(sent, total, "正在导入训练服务器")
+        result = self._request(f"/api/uploads/{created['id']}/complete", method="POST", payload={})
+        progress(total, total, "训练包已导入服务器，等待管理员审核")
+        return result

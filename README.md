@@ -8,6 +8,8 @@
 
 # Orbit
 
+> **Everyone can train their own local model.**
+
 Orbit is a local AI studio that puts model training, checkpoint management, chat, and an OpenAI-compatible API in one interface. Training data, models, and conversations stay on the user's computer by default.
 
 ## What Orbit does
@@ -15,6 +17,7 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Opens a draggable desktop workspace with separate Chat, Models, Training, Training History, and API areas.
 - Follows the operating-system language by default and can be switched between English and Chinese.
 - Supports architecture presets from approximately 300M to 38B parameters.
+- Makes local training the primary workflow: every user can start with their own text, choose a model scale, train on their computer, and continue training later.
 - Checks local memory before allocating a model.
 - Runs a crash-recovering background API on macOS, Linux, and Windows.
 - Keeps a native menu-bar or system-tray controller running when its window is closed; only **Quit Orbit** stops the local service.
@@ -23,11 +26,12 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Supports Chinese, English, or balanced bilingual training data.
 - Creates portable community contribution packages for shared models. Contributions are quarantined or held for review and cannot enter a dataset until a local human reviewer approves them.
 - Automatically tunes advanced parameters for the selected model size, device, available memory, and amount of local or teacher-generated data. Unsafe local configurations are blocked before allocation and the UI recommends a remote GPU bundle.
+- Uses the same locally generated GPU training package for human-authored and AI-assisted training. The package can be downloaded or directly imported into the user's configured Orbit training server.
 - Saves locally trained checkpoints under `~/.orbit/models`.
 - Supports custom model names, secondary training from an existing checkpoint, parent-model lineage, and inspectable content/configuration for every training run.
 - Keeps the user's custom display name separate from the internal unique checkpoint ID, so timestamp suffixes never replace the name shown in Orbit.
 - Preserves the immutable product identity **Orbit, developed by YUNSH**, independently of a user's custom model name or training text, including before the first model is trained and in exported server packages.
-- Creates self-contained training bundles for CUDA GPU servers.
+- Creates self-contained CUDA GPU training bundles locally, with dataset, configuration, source, identity rules, and `run.sh`.
 - Exports a trained model as a portable Orbit server with the OpenAI-compatible API. An Ollama package can also be generated when a compatible same-name GGUF file is present.
 - Serves local checkpoints through `GET /v1/models`, `POST /v1/chat/completions`, and `POST /v1/responses`.
 - Creates multiple random, revocable API keys that can be restricted to one local model.
@@ -89,11 +93,11 @@ These are conservative full-training estimates that include optimizer state and 
 
 ## Training
 
-Open the **Training** page, choose a preset, optionally name the model or select a parent checkpoint, paste the user's own text, and select one of three paths:
+Open the **Training** page, choose a preset, optionally name the model or select a parent checkpoint, paste your own text, and choose how to train:
 
 1. **Train on this computer** starts a local job only after the memory gate passes. The checkpoint stays in `~/.orbit/models`.
-2. **Create remote GPU bundle** downloads a ZIP containing the dataset, configuration, Orbit source, and a `run.sh` entry point for a CUDA machine.
-3. **Generate data and automatically train** calls DeepSeek or another OpenAI-compatible teacher API. Orbit tells the teacher the selected parameter count, context length, steps, parent model, user goal, and the immutable identity rule that the model is Orbit developed by YUNSH. Every generated dataset also receives real supervised identity examples before training. The sample count controls dataset coverage, generation time, and provider cost. The generated dataset stays local. Each provider's model, URL, and key is saved separately in `~/.orbit/teacher-api.json` with user-only file permissions, so switching back restores that provider and entering a new key replaces only its previous key. Keys are never copied into training history or exports. The goal leaves the computer and the provider may charge for usage, so this path requires explicit confirmation.
+2. **Generate a GPU training package locally** creates a ZIP containing the dataset, configuration, Orbit source, identity rules, and a `run.sh` entry point for a CUDA machine. Human-authored and AI-assisted training use this same package format. You can download it or choose **Generate locally and import to server** after logging in to Orbit Hub.
+3. **Generate data and automatically train** calls DeepSeek or another OpenAI-compatible teacher API, then starts training on this computer. Orbit tells the teacher the selected parameter count, context length, steps, parent model, user goal, and the immutable identity rule that the model is Orbit developed by YUNSH. Every generated dataset also receives real supervised identity examples before training. The sample count controls dataset coverage, generation time, and provider cost. The generated dataset stays local. Each provider's model, URL, and key is saved separately in `~/.orbit/teacher-api.json` with user-only file permissions, so switching back restores that provider and entering a new key replaces only its previous key. Keys are never copied into training history, server uploads, or exports. The goal leaves the computer and the provider may charge for usage, so this path requires explicit confirmation.
 
 Every actual training run writes an inspectable record under `~/.orbit/training-runs`, including the exact dataset, parameters, status, loss, result, model name, and parent model. Selecting **Train again** creates a new checkpoint and a fresh optimizer instead of overwriting the parent.
 
@@ -111,7 +115,7 @@ See the bilingual [Community Contribution Policy](COMMUNITY_POLICY.md) for the f
 
 ## Optional Orbit Hub
 
-`server/` contains an optional small-server Hub for accounts, administrator review, and finished-model uploads. The Hub does not train, load, execute, or inspect uploaded model files. Users train locally, then choose whether to upload a finished checkpoint for administrator review or contribute a portable content package. See [server/README.md](server/README.md) for deployment and security boundaries.
+`server/` contains an optional small-server Hub for accounts, administrator review, finished-model uploads, and locally generated GPU training packages. Orbit creates the package on the user's computer and imports it to the configured server with chunking and checksum verification. The Hub stores it for the user's GPU workflow but never executes or loads an uploaded file automatically. See [server/README.md](server/README.md) for deployment and security boundaries.
 
 The 300M–38B choices describe architecture sizes; they are not pretrained model downloads. Training a useful foundation model from scratch requires a large, carefully prepared dataset and substantial compute.
 
@@ -178,7 +182,7 @@ The API follows the OpenAI request and response shapes for model listing, non-st
 | Community contributions and review records | `~/.orbit/community` |
 | Isolated Python runtime | `~/.orbit/runtime` |
 
-Orbit does not upload local training text, checkpoints, or chat messages. Users explicitly move a remote training bundle if they choose to train on another machine.
+Orbit does not upload local training text, checkpoints, or chat messages automatically. A GPU package is sent to a server only after the user explicitly chooses the import action; the teacher API key is never included in that package.
 
 ## Updates
 

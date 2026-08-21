@@ -89,6 +89,10 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "/api/training/stop-delete" in PAGE
     assert "stopped_deleted" in PAGE
     assert 'id="createRemoteAI"' in PAGE
+    assert 'id="importRemote"' in PAGE
+    assert 'id="importRemoteAI"' in PAGE
+    assert "/api/hub/job-upload" in PAGE
+    assert "gpu_training_bundle" in PAGE
     assert "Second confirmation" in PAGE
     assert 'data-i18n="examplesHelp"' in PAGE
     assert 'id="teacherKey" type="password"' in PAGE

@@ -16,6 +16,7 @@ from .config import OrbitConfig
 from .community import CommunityStore
 from .conversations import ConversationStore
 from .hub import OrbitHubClient
+from .jobs import create_job_bundle
 from .identity import (
     ORBIT_SYSTEM_PROMPT,
     ORBIT_TRAINING_ANCHOR,
@@ -790,6 +791,82 @@ class OrbitRuntime:
                     self._hub_upload.update(status="failed", message=str(exc))
 
         threading.Thread(target=worker, name="orbit-hub-upload", daemon=True).start()
+        return self.hub_upload_state()
+
+    def start_hub_job_upload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create the GPU bundle locally, then import that same bundle to Hub."""
+        with self._state_lock:
+            if self._hub_upload.get("status") in {"hashing", "uploading"}:
+                raise RuntimeError("已有文件正在导入服务器")
+        train_cfg = TrainingConfig(
+            steps=int(payload.get("steps", 1000)),
+            batch_size=int(payload.get("batch_size", 1)),
+            seq_len=int(payload.get("seq_len", 2048)),
+            grad_accum=int(payload.get("grad_accum", 8)),
+            learning_rate=float(payload.get("learning_rate", 3e-4)),
+            warmup_steps=int(payload.get("warmup_steps", 100)),
+            weight_decay=float(payload.get("weight_decay", 0.1)),
+            grad_clip=float(payload.get("grad_clip", 1.0)),
+            precision=str(payload.get("precision", "auto")),
+            scheduler=str(payload.get("scheduler", "cosine")),
+            checkpoint_every=int(payload.get("checkpoint_every", 500)),
+            seed=int(payload.get("seed", 42)),
+        )
+        train_cfg.validate()
+        preset = str(payload.get("preset", "1b")).lower()
+        text = str(payload.get("text", "")).strip() or ("Orbit training sample. " * 100)
+        assistant = payload.get("assistant") if isinstance(payload.get("assistant"), dict) else None
+        if assistant:
+            assistant = dict(assistant)
+            assistant.pop("api_key", None)
+            assistant.pop("key", None)
+        model_name = str(payload.get("model_name", "orbit"))
+        bundle = create_job_bundle(
+            self.jobs_root, preset, train_cfg.steps, train_cfg.batch_size,
+            train_cfg.seq_len, train_cfg.learning_rate, text,
+            training_config=train_cfg, model_name=model_name,
+            data_language=str(payload.get("data_language", "bilingual")),
+            assistant=assistant,
+        )
+        cfg = OrbitConfig.for_preset(preset)
+        with self._state_lock:
+            if self._hub_upload.get("status") in {"hashing", "uploading"}:
+                raise RuntimeError("已有文件正在导入服务器")
+            self._hub_upload = {
+                "status": "hashing", "progress": 0,
+                "message": "已在本机生成 GPU 训练包，准备导入服务器",
+                "model": model_name, "kind": "gpu_training_bundle", "bundle": str(bundle),
+            }
+
+        def progress(current: int, total: int, message: str) -> None:
+            with self._state_lock:
+                self._hub_upload.update(
+                    status="uploading" if "导入" in message or "上传" in message else "hashing",
+                    progress=round(current / max(1, total) * 100, 1), message=message,
+                )
+
+        def worker() -> None:
+            try:
+                result = self.hub.upload_training_bundle(bundle, {
+                    "name": f"Orbit GPU training · {model_name}",
+                    "preset": preset,
+                    "parameters": cfg.estimate_parameters(),
+                    "description": (
+                        "GPU training bundle generated locally by Orbit. "
+                        "AI-assisted and human-authored training use the same bundle format; "
+                        "the server does not execute it automatically."
+                    ),
+                }, progress)
+                with self._state_lock:
+                    self._hub_upload.update(
+                        status="uploaded", progress=100,
+                        message="训练包已导入服务器，等待管理员审核", result=result,
+                    )
+            except Exception as exc:
+                with self._state_lock:
+                    self._hub_upload.update(status="failed", message=str(exc))
+
+        threading.Thread(target=worker, name="orbit-hub-job-upload", daemon=True).start()
         return self.hub_upload_state()
 
     def _remove_model_files(self, model_id: str) -> list[str]:

@@ -16,6 +16,8 @@ def test_remote_job_bundle_is_self_contained(tmp_path):
         job = json.loads(archive.read(job_name))
         assert job["preset"] == "1b"
         assert job["data_language"] == "bilingual"
+        assert job["generated_locally"] is True
+        assert job["bundle_kind"] == "gpu_training"
 
 
 def test_ai_assisted_remote_bundle_keeps_api_key_out(tmp_path):
