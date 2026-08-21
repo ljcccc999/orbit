@@ -281,6 +281,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.settings.update(data))
             elif path == "/api/conversations":
                 self._json(201, self.server.runtime.conversations.create())
+            elif path == "/api/conversations/delete":
+                self._json(200, self.server.runtime.conversations.delete(str(data.get("id", ""))))
             elif path == "/api/training/stop":
                 self._json(202, self.server.runtime.stop_training())
             elif path == "/api/training/stop-delete":

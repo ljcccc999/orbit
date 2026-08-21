@@ -79,9 +79,13 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert 'id="newChat"' in PAGE
     assert 'id="stopDeleteTraining"' in PAGE
     assert 'id="loadActiveModel"' in PAGE
+    assert 'id="chatModel"' in PAGE
     assert "thinking-bubble" in PAGE
     assert 'autocomplete="new-password"' in PAGE
     assert 'data-page="settings"' in PAGE
+    assert 'id="settingsUpdateNow"' in PAGE
+    assert "/api/conversations/delete" in PAGE
+    assert "model:$('chatModel').value||null" in PAGE
     assert "/api/training/stop-delete" in PAGE
     assert "stopped_deleted" in PAGE
     assert 'data-i18n="examplesHelp"' in PAGE
@@ -110,6 +114,20 @@ def test_http_health_models_and_openai_chat(tmp_path):
     try:
         with urllib.request.urlopen(base + "/api/health") as response:
             assert json.loads(response.read())["name"] == "orbit"
+        conversation_request = urllib.request.Request(
+            base + "/api/conversations",
+            data=b"{}",
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(conversation_request) as response:
+            conversation = json.loads(response.read())
+        delete_request = urllib.request.Request(
+            base + "/api/conversations/delete",
+            data=json.dumps({"id": conversation["id"]}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(delete_request) as response:
+            assert json.loads(response.read())["status"] == "deleted"
         teacher_request = urllib.request.Request(
             base + "/api/teacher/settings",
             data=json.dumps({

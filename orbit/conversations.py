@@ -37,6 +37,13 @@ class ConversationStore:
             raise FileNotFoundError("找不到该历史对话")
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def delete(self, conversation_id: str) -> dict[str, str]:
+        path = self._path(conversation_id)
+        if not path.is_file():
+            raise FileNotFoundError("找不到该历史对话")
+        path.unlink()
+        return {"status": "deleted", "id": conversation_id}
+
     def list(self) -> list[dict[str, Any]]:
         rows = []
         for path in self.root.glob("*.json"):
