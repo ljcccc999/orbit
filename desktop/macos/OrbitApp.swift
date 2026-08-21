@@ -31,14 +31,13 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if terminationInProgress { return .terminateLater }
+        if terminationInProgress { return .terminateNow }
         terminationInProgress = true
-        if !systemIsShuttingDown { removeLoginAgent() }
-        Task {
-            await uninstallOrbitService()
-            await MainActor.run { sender.reply(toApplicationShouldTerminate: true) }
+        if !systemIsShuttingDown {
+            removeLoginAgent()
+            uninstallOrbitServiceBeforeExit()
         }
-        return .terminateLater
+        return .terminateNow
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -188,8 +187,18 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
         try await run(executable, arguments)
     }
 
-    private func uninstallOrbitService() async {
-        try? await runOrbit(["service", "uninstall"])
+    private func uninstallOrbitServiceBeforeExit() {
+        let executable = orbitExecutable()
+        guard FileManager.default.isExecutableFile(atPath: executable) else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["service", "uninstall"]
+        do { try process.run() } catch { return }
+        let deadline = Date().addingTimeInterval(4)
+        while process.isRunning && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        if process.isRunning { process.terminate() }
     }
 
     private func loginAgentPath() -> URL {
@@ -246,6 +255,21 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
             webView.isHidden = false
             spinner.isHidden = true
             statusLabel.isHidden = true
+        }
+        await monitorOrbitService()
+    }
+
+    private func monitorOrbitService() async {
+        while !Task.isCancelled && !terminationInProgress {
+            try? await Task.sleep(for: .seconds(5))
+            if terminationInProgress { return }
+            if !(await isHealthy()) {
+                try? await runOrbit(["start"])
+                for _ in 0..<20 {
+                    if await isHealthy() { break }
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+            }
         }
     }
 }

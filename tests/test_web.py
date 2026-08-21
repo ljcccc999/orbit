@@ -10,6 +10,7 @@ from orbit.config import OrbitConfig
 from orbit.model import OrbitForCausalLM
 from orbit.runtime import OrbitRuntime
 from orbit.web import OrbitHTTPServer
+from orbit.web_ui import PAGE
 
 
 def _write_tiny_checkpoint(runtime: OrbitRuntime, model_id: str = "orbit-test") -> None:
@@ -33,6 +34,12 @@ def test_untrained_runtime_still_has_orbit_identity(tmp_path):
     assert result["model"] == "orbit"
     assert "Orbit" in result["content"]
     assert runtime.list_models() == []
+
+
+def test_desktop_workspace_keeps_training_page_scrollable():
+    assert ".workspace{min-width:0;min-height:0" in PAGE
+    assert ".content{min-height:0;overflow-x:hidden;overflow-y:auto" in PAGE
+    assert "serviceUnavailable:'Orbit 本地服务暂时不可用，正在重新连接…'" in PAGE
 
 
 def test_http_health_models_and_openai_chat(tmp_path):

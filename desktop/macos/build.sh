@@ -23,6 +23,7 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Orbit.icns"
 rm -rf "$ICONSET"
+/usr/bin/xattr -cr "$APP"
 codesign --force --deep --sign "${ORBIT_CODESIGN_IDENTITY:--}" "$APP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUTPUT/Orbit-macOS-universal.zip"
 printf '%s\n' "$OUTPUT/Orbit-macOS-universal.zip"
