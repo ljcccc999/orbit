@@ -1374,6 +1374,10 @@ class OrbitRuntime:
             self._set_loading("loading", 10, "正在检查 checkpoint", model_id)
             require_checkpoint_load_capacity(checkpoint.stat().st_size, self.models_root)
             self.unload_model()
+            # unload_model() sets the cancellation event for an existing
+            # loader.  This is a new load operation, so clear that stale flag
+            # after unloading and before starting the inference worker.
+            self._load_cancel.clear()
             log_path = self.data_root / "logs" / "inference-worker.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_handle = log_path.open("a", encoding="utf-8")
