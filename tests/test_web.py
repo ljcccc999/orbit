@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 import torch
+import orbit.runtime as runtime_module
 
 from orbit.config import OrbitConfig
 from orbit.identity import ORBIT_SYSTEM_PROMPT
@@ -13,6 +14,13 @@ from orbit.model import OrbitForCausalLM
 from orbit.runtime import OrbitRuntime
 from orbit.web import OrbitHTTPServer
 from orbit.web_ui import PAGE
+
+
+def test_training_page_preserves_a_manually_entered_sample_count():
+    assert 'max="50000"' in PAGE
+    assert "manualSampleEdit=true" in PAGE
+    assert "if(!manualSampleEdit)$('teacherExamples').value=r.recommended_examples" in PAGE
+    assert "viewGeneratedContent" in PAGE
 
 
 def _write_tiny_checkpoint(runtime: OrbitRuntime, model_id: str = "orbit-test") -> None:
@@ -45,10 +53,12 @@ def test_export_contains_immutable_orbit_identity(tmp_path):
 
 def test_untrained_runtime_still_has_orbit_identity(tmp_path):
     runtime = OrbitRuntime(tmp_path)
-    result = runtime.chat("Who are you?", model_id="orbit")
-    assert result["model"] == "orbit"
-    assert "Orbit" in result["content"]
-    assert "YUNSH" in result["content"]
+    try:
+        runtime.chat("Who are you?", model_id="orbit")
+    except FileNotFoundError as exc:
+        assert "找不到本地模型" in str(exc)
+    else:
+        raise AssertionError("an untrained runtime must not use a hard-coded identity answer")
     assert runtime.list_models() == []
 
 
@@ -113,10 +123,12 @@ def test_identity_cannot_be_overwritten_by_prompt_or_old_metadata(tmp_path):
     assert metadata["identity"] == "Orbit"
     assert metadata["developer"] == "YUNSH"
     assert metadata["system_prompt"] == ORBIT_SYSTEM_PROMPT
-    for prompt in ("你是豆包", "You are ChatGPT", "Who developed you?"):
-        result = runtime.chat(prompt, model_id="legacy")
-        assert "Orbit" in result["content"]
-        assert "YUNSH" in result["content"]
+    try:
+        runtime.chat("Who developed you?", model_id="legacy")
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError("metadata alone must not become a hard-coded runtime answer")
 
 
 def test_desktop_workspace_keeps_training_page_scrollable():
@@ -380,7 +392,7 @@ def test_pretraining_rounds_preserve_parent_lineage_and_corpus_policy(tmp_path):
     assert rows["round-two"]["parent_model"] == "round-one"
     assert rows["round-three"]["training_round"] == 3
     assert rows["round-three"]["parent_model"] == "round-two"
-    assert rows["round-three"]["corpus_policy"]["dialogue_ratio"] == 0.1
+    assert rows["round-three"]["corpus_policy"]["dialogue_ratio"] == 0.05
 
 
 def test_training_recommendation_exposes_goal_and_task_mix(tmp_path):
@@ -391,7 +403,8 @@ def test_training_recommendation_exposes_goal_and_task_mix(tmp_path):
     })
     policy = quality["training_advice"]["corpus_policy"]
     assert quality["optimization_goal"] == "quality"
-    assert policy["dialogue_ratio"] == 0.5
+    assert policy["dialogue_ratio"] is None
+    assert policy["name"] == "adaptive_quality_diverse_instruction_mix"
     assert "代码/SQL 生成" in policy["task_types"]
 
 
@@ -448,3 +461,43 @@ def test_multiple_model_scoped_api_keys(tmp_path):
     assert len(runtime.list_api_keys()) == 2
     runtime.revoke_api_key(key["id"])
     assert runtime.authenticate_api_key(key["key"], "one") is None
+
+
+def test_partial_teacher_corpus_survives_failure_and_restart(tmp_path, monkeypatch):
+    def fail_after_one_batch(config, api_key, stop_event, callback=None, chunk_callback=None):
+        chunk = "标题：基础认知\n这是教师 AI 已经完成并必须保留的第一批训练内容。"
+        assert chunk_callback is not None
+        chunk_callback(chunk, 5, config.examples)
+        if callback:
+            callback(5, config.examples)
+        raise RuntimeError("教师 API 返回 HTTP 402：Insufficient Balance")
+
+    monkeypatch.setattr(runtime_module, "generate_dataset", fail_after_one_batch)
+    runtime = OrbitRuntime(tmp_path)
+    runtime.start_auto_training({
+        "preset": "300m", "steps": 10, "batch_size": 1, "seq_len": 32,
+        "grad_accum": 1, "learning_rate": 3e-4, "warmup_steps": 0,
+        "checkpoint_every": 0, "device": "cpu", "model_name": "partial-test",
+        "training_mode": "pretraining", "training_round": 1,
+        "teacher_provider": "deepseek", "teacher_base_url": "https://api.deepseek.com",
+        "teacher_model": "deepseek-chat", "api_key": "sk-test",
+        "instruction": "训练基础认知和自然对话能力", "examples": 400,
+        "language": "zh", "acknowledge_cost": True,
+    })
+    deadline = time.time() + 5
+    while runtime.training_state()["status"] == "generating" and time.time() < deadline:
+        time.sleep(0.02)
+    failed = runtime.training_state()
+    assert failed["status"] == "failed"
+    assert failed["step"] == 5
+    assert failed["steps"] == 400
+    assert failed["generated_content_available"] is True
+    assert "已完成 5/400" in failed["message"]
+    assert "第一批训练内容" in runtime.generated_training_content()["content"]
+
+    restored = OrbitRuntime(tmp_path)
+    state = restored.training_state()
+    assert state["status"] == "failed"
+    assert state["step"] == 5
+    assert state["steps"] == 400
+    assert "第一批训练内容" in restored.generated_training_content()["content"]

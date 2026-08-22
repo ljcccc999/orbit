@@ -54,6 +54,7 @@ class OrbitRuntime:
         self.api_keys_path = self.data_root / "api-keys.json"
         self._api_keys = self._load_or_create_api_keys()
         self.teacher_settings_path = self.data_root / "teacher-api.json"
+        self.training_state_path = self.data_root / "training-state.json"
         self._teacher_settings = self._load_teacher_settings()
         self.community = CommunityStore(self.data_root)
         self.conversations = ConversationStore(self.data_root)
@@ -101,6 +102,28 @@ class OrbitRuntime:
         non-running states are safe to expose here.
         """
         restorable = {"stopped", "failed", "waiting_memory", "needs_memory"}
+        # AI corpus generation can fail before a normal training run exists.
+        # Restore its durable partial-corpus snapshot first so closing/reopening
+        # Orbit never makes completed teacher batches disappear.
+        if self.training_state_path.is_file():
+            try:
+                saved = json.loads(self.training_state_path.read_text(encoding="utf-8"))
+                generated = Path(str(saved.get("generated_content_path") or ""))
+                if (
+                    isinstance(saved, dict)
+                    and str(saved.get("status", "")) in restorable | {"generating"}
+                    and generated.is_file()
+                    and generated.resolve().parent == self.datasets_root.resolve()
+                ):
+                    if saved.get("status") == "generating":
+                        saved["status"] = "failed"
+                        saved["message"] = "Orbit 重新启动，AI 生成已中断；已完成的样本仍保存在本机，可查看或复制"
+                    saved["generated_content_available"] = generated.stat().st_size > 0
+                    saved["generated_content_bytes"] = generated.stat().st_size
+                    self._training.update(saved)
+                    return
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                pass
         candidates = []
         for path in self.training_runs_root.glob("*/run.json"):
             try:
@@ -127,6 +150,22 @@ class OrbitRuntime:
                 run_id=str(row.get("id") or path.parent.name),
             )
             return
+
+    def _save_generation_state(self) -> None:
+        """Atomically persist non-secret AI generation progress."""
+        with self._state_lock:
+            state = {
+                key: self._training.get(key)
+                for key in (
+                    "status", "phase", "step", "steps", "message", "model_id",
+                    "teacher_model", "dataset", "assisted",
+                    "generated_content_available", "generated_content_path",
+                    "generated_content_bytes", "training_mode", "training_round",
+                )
+            }
+        temporary = self.training_state_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, self.training_state_path)
 
     def _load_or_create_api_keys(self) -> list[dict[str, str]]:
         if self.api_keys_path.is_file():
@@ -503,7 +542,7 @@ class OrbitRuntime:
             "en": "Research-informed recipe: plan pretraining by total tokens instead of repeatedly cycling a tiny sample set; deduplicate and quality-filter before mixing documents and code, and keep a held-out validation set. For fine-tuning, start with a lower learning rate and roughly 1–3 dataset passes, then add steps only when held-out validation improves.",
         })
         if requested_mode == "fine_tuning":
-            mode_title = {"zh": "微调（专业文献 + 约 50% 对话）", "en": "Fine-tuning (specialized documents + about 50% dialogue)"}
+            mode_title = {"zh": "微调（专业文献 + 验证驱动的任务/对话混合）", "en": "Fine-tuning (specialized documents + validation-driven task/dialogue mix)"}
             if not base_model:
                 advice.append({
                     "severity": "warning", "code": "finetune_parent_required",
@@ -913,6 +952,8 @@ class OrbitRuntime:
         row = json.loads(path.read_text(encoding="utf-8"))
         dataset = Path(str(row.get("dataset", "")))
         row["content"] = dataset.read_text(encoding="utf-8") if dataset.is_file() else ""
+        generated_dataset = Path(str(row.get("generated_content_path", "")))
+        row["generated_content"] = generated_dataset.read_text(encoding="utf-8") if generated_dataset.is_file() else ""
         training_dataset = Path(str(row.get("training_dataset", "")))
         row["training_content"] = training_dataset.read_text(encoding="utf-8") if training_dataset.is_file() else ""
         return row
@@ -1198,6 +1239,8 @@ class OrbitRuntime:
             "corpus_plan": str(payload.get("corpus_plan", "")),
             "corpus_policy": self._corpus_policy(training_mode),
             "identity_training_examples": ORBIT_TRAINING_ANCHOR,
+            "quality_status": "unverified",
+            "quality_note": "训练流程已完成，但模型回答质量尚未通过独立对话验证。",
             "training_runs": [run_id], "architecture": "orbit-hybrid-moe-v1", "ollama_ready": False,
             "created_at": run["created_at"],
         }
@@ -1289,17 +1332,18 @@ class OrbitRuntime:
             if return_code != 0 and not final_type and not self._stop_event.is_set():
                 raise RuntimeError(f"隔离训练进程异常退出（{return_code}）")
             stopped = final_type == "stopped" or self._stop_event.is_set()
+            final_message = (self._stop_reason or "训练已停止，已原子保存当前 checkpoint") if stopped else "训练流程完成，模型已保存；对话质量尚未通过独立验证"
             with self._state_lock:
                 self._training.update(
-                    status="stopped" if stopped else "completed",
-                    message=(self._stop_reason or "训练已停止，已原子保存当前 checkpoint") if stopped else "训练完成，模型已保存在本机",
+                    status="running",
+                    message="训练已结束，正在原子保存模型和训练记录",
                 )
             waiting_for_memory = stopped and memory_stop and not self._delete_after_stop
             run.update(
                 status="stopped_deleted" if stopped and self._delete_after_stop else ("waiting_memory" if waiting_for_memory else ("stopped" if stopped else "completed")),
                 completed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 step=int(self._training.get("step", 0)), loss=self._training.get("loss"),
-                message=("训练已暂停，内存恢复到安全水平后会自动继续" if waiting_for_memory else ("训练已停止，未完成模型已删除" if stopped and self._delete_after_stop else self._training.get("message"))),
+                message=("训练已暂停，内存恢复到安全水平后会自动继续" if waiting_for_memory else ("训练已停止，未完成模型已删除" if stopped and self._delete_after_stop else final_message)),
             )
             if stopped and self._delete_after_stop:
                 self._remove_model_files(model_id)
@@ -1308,6 +1352,11 @@ class OrbitRuntime:
             self._save_run(run)
             if not (stopped and self._delete_after_stop):
                 self._write_model_metadata(model_id, metadata)
+            with self._state_lock:
+                self._training.update(
+                    status="stopped_deleted" if stopped and self._delete_after_stop else ("stopped" if stopped else "completed"),
+                    message=("训练已停止，未完成模型已删除" if stopped and self._delete_after_stop else final_message),
+                )
             if waiting_for_memory:
                 resume_payload = dict(payload)
                 resume_payload["_resume_model_id"] = model_id
@@ -1394,7 +1443,10 @@ class OrbitRuntime:
             self._training = {
                 "status": "generating", "phase": "generation", "step": 0, "steps": teacher.examples,
                 "loss": None, "message": "正在调用教师 API 生成训练语料", "model_id": None,
-                "teacher_model": teacher.model,
+                "teacher_model": teacher.model, "assisted": True,
+                "generated_content_available": False, "generated_content_path": "",
+                "generated_content_bytes": 0, "training_mode": selected_mode,
+                "training_round": teacher.training_round,
                 "_started_monotonic": time.monotonic(),
             }
 
@@ -1423,6 +1475,7 @@ class OrbitRuntime:
                         dataset=str(partial_dataset),
                         message=f"正在生成训练语料：{current}/{total}（已保存）",
                     )
+                self._save_generation_state()
 
             try:
                 text, usage = generate_dataset(teacher, api_key, self._stop_event, generated, save_generated_chunk)
@@ -1432,6 +1485,7 @@ class OrbitRuntime:
                 temporary = dataset.with_suffix(".tmp")
                 temporary.write_text(text, encoding="utf-8")
                 os.replace(temporary, dataset)
+                self.training_state_path.unlink(missing_ok=True)
                 # Manual corpus and teacher corpus are additive. Keep the
                 # teacher-only file for preview, and train on one combined
                 # corpus when the user supplied both kinds of content.
@@ -1489,6 +1543,10 @@ class OrbitRuntime:
                         generated_content_available=False if delete_after_stop else self._training.get("generated_content_available", False),
                         generated_content_path="" if delete_after_stop else self._training.get("generated_content_path", ""),
                     )
+                if delete_after_stop:
+                    self.training_state_path.unlink(missing_ok=True)
+                else:
+                    self._save_generation_state()
             except Exception as exc:
                 with self._state_lock:
                     delete_after_stop = bool(self._delete_after_stop)
@@ -1502,11 +1560,18 @@ class OrbitRuntime:
                         self._delete_after_stop = False
                     self._training.update(
                         status="stopped_deleted" if delete_after_stop else "failed",
-                        message=("训练已停止，样本和未完成模型已删除" if delete_after_stop else str(exc)),
+                        message=("训练已停止，样本和未完成模型已删除" if delete_after_stop else (
+                            f"{exc}；已完成 {self._training.get('step', 0)}/{self._training.get('steps', 0)} 个样本，已生成内容保存在本机，可在训练页查看"
+                            if self._training.get("generated_content_available") else str(exc)
+                        )),
                         dataset="" if delete_after_stop else self._training.get("dataset", ""),
                         generated_content_available=False if delete_after_stop else self._training.get("generated_content_available", False),
                         generated_content_path="" if delete_after_stop else self._training.get("generated_content_path", ""),
                     )
+                if delete_after_stop:
+                    self.training_state_path.unlink(missing_ok=True)
+                elif self._training.get("generated_content_available"):
+                    self._save_generation_state()
 
         self._work_thread = threading.Thread(target=worker, name="orbit-auto-training", daemon=True)
         self._work_thread.start()

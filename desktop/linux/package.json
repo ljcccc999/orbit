@@ -1,6 +1,8 @@
 {
   "name": "orbit-linux-desktop",
-  "version": "0.6.27",
+  "version": "0.6.28",
+  "author": "YUNSH",
+  "desktopName": "top.orbit.desktop",
   "private": true,
   "description": "Orbit local AI desktop app for Linux",
   "main": "main.js",
@@ -36,6 +38,7 @@
     "linux": {
       "target": ["AppImage"],
       "category": "Development",
+      "syncDesktopName": true,
       "icon": "../../orbit/static/orbit-logo.png"
     }
   }
