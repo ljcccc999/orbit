@@ -339,6 +339,17 @@ PAGE = PAGE.replace(
     1,
 )
 
+# Make the responsibility split visible above the manual corpus field and
+# keep it synchronized with the selected training mode in the browser.
+PAGE = PAGE.replace(
+    "预训练：加入大量清洗后的文献、书籍、技术资料、代码，再加入少量结构化任务/对话。微调：加入专业文献、带明确输入输出的单轮任务，以及约 50% 高质量指令对话。",
+    "预训练人工内容：多篇清洗后的文献、教材、技术资料、代码、代码注释，以及你希望 Orbit 记住的专属项目知识；不要只写几句问答。微调人工内容：专业文献、术语、产品资料、代码规范、标注规则和约 50% 高质量指令对话。人工内容负责你自己的 Orbit 知识；AI 辅助负责基础认知和通用能力，两者可同时训练。",
+)
+PAGE = PAGE.replace(
+    "Pretraining: add many clean documents, books, technical references and code, then a small amount of structured tasks/dialogue. Fine-tuning: add domain documents, labeled single-turn tasks and about 50% high-quality instruction dialogue.",
+    "Pretraining manual content: cleaned documents, books, technical references, code, comments and the project-specific knowledge you want Orbit to remember. Fine-tuning manual content: specialized documents, terminology, product material, coding conventions, labeling rules and about 50% high-quality instruction dialogue. Manual content teaches your private Orbit knowledge; AI assistance supplies foundational ability, and both can train together.",
+)
+
 # Include the linked manual-text recommendation in each optimization choice.
 PAGE = PAGE.replace(
     "${r.recommended_examples||'—'} samples`;option.title=zh?",

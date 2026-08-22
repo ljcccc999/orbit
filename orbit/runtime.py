@@ -470,8 +470,13 @@ class OrbitRuntime:
         policy = self._corpus_policy(requested_mode)
         advice.append({
             "severity": "info", "code": "corpus_policy",
-            "zh": f"语料建议：{policy['description']}。结构化任务包括分类/情感分析、NER、代码/SQL、摘要和扩写/润色；这些是单轮输入→输出，不是聊天气泡。",
-            "en": f"Corpus policy: {policy['description']}. Structured tasks include classification/sentiment, NER, code/SQL, summarization and expansion/polishing; these are single-turn input→output tasks, not chat bubbles.",
+            "zh": f"语料建议：{policy['description']}。人工内容负责你希望 Orbit 记住的专属知识、代码规范、产品资料和目标；AI 辅助负责基础认知、通用语言能力和基础任务。结构化任务包括分类/情感分析、NER、代码/SQL、摘要和扩写/润色；这些是单轮输入→输出，不是聊天气泡。",
+            "en": f"Corpus policy: {policy['description']}. Your manual corpus teaches Orbit the private knowledge, coding conventions, product material and goals you want it to remember; AI assistance supplies basic knowledge, general language ability and foundational tasks. Structured tasks include classification/sentiment, NER, code/SQL, summarization and expansion/polishing; these are single-turn input→output tasks, not chat bubbles.",
+        })
+        advice.append({
+            "severity": "info", "code": "manual_ai_roles",
+            "zh": "如果同时使用人工语料和 AI 辅助：AI 生成基础认知、通用语言/代码模式和少量基础任务；人工语料只放你希望 Orbit 学会的专属内容。两部分会合并训练，AI 不会覆盖人工内容。",
+            "en": "When both sources are enabled: AI generates foundational knowledge, general language/code patterns and basic tasks; your manual corpus contains the specific material you want Orbit to learn. Both are merged into one run, and AI does not replace your manual content.",
         })
         if requested_mode == "fine_tuning":
             mode_title = {"zh": "微调（专业文献 + 约 50% 对话）", "en": "Fine-tuning (specialized documents + about 50% dialogue)"}
@@ -587,6 +592,9 @@ class OrbitRuntime:
             "recommended_manual_chars": recommended_manual_chars,
             "recommended_manual_words": recommended_manual_words,
             "recommended_manual_text": f"约 {recommended_manual_chars:,} 个字符（约 {recommended_manual_words:,} 个词；中文可按字符数准备）",
+            "manual_content_recommendation": self._corpus_policy(requested_mode)["manual_recommendation"],
+            "ai_content_recommendation": self._corpus_policy(requested_mode)["ai_recommendation"],
+            "mixed_content_strategy": self._corpus_policy(requested_mode)["mixed_strategy"],
             "config": config.__dict__,
             "estimated_step_seconds": round(estimated_step_seconds),
             "estimated_training_seconds": estimated_training_seconds,
@@ -994,6 +1002,9 @@ class OrbitRuntime:
                 "dialogue_ratio": 0.5,
                 "task_types": ["分类/情感分析", "实体抽取（NER）", "代码/SQL 生成", "摘要总结", "文本扩写/润色"],
                 "description": "专业文献约 25%，分类/NER/代码/SQL/摘要/扩写等单轮任务约 25%，对话约 50%",
+                "manual_recommendation": "人工：专业文献、产品/领域知识、术语、代码规范、标注规则和希望模型遵守的回答格式；人工内容应以你真实希望它掌握的专属知识为主。",
+                "ai_recommendation": "AI 辅助：生成基础认知、通用编程模式、结构化任务和少量基础对话，帮助模型学会输入→输出和指令遵循。",
+                "mixed_strategy": "同时训练时，AI 负责基础能力，人工内容负责 Orbit 的专属知识；两部分合并，不互相替换。",
             }
         return {
             "name": "document_first_with_small_dialogue_tail",
@@ -1002,6 +1013,9 @@ class OrbitRuntime:
             "dialogue_ratio": 0.1,
             "task_types": ["分类/情感分析", "实体抽取（NER）", "代码/SQL 生成", "摘要总结", "文本扩写/润色"],
             "description": "多篇文献、教材、技术资料与代码约 80%，单轮结构化任务约 10%，少量对话和身份样本约 10%",
+            "manual_recommendation": "人工：多篇清洗后的文献、教材、技术资料、代码、代码注释、事实材料，以及你希望 Orbit 记住的产品/项目专属知识；不要只写几句问答。",
+            "ai_recommendation": "AI 辅助：生成基础认知、通用世界知识表达、基础编程模式、分类/NER/代码/SQL/摘要/扩写任务，再追加少量基础对话和身份样本。",
+            "mixed_strategy": "同时训练时，AI 先补足基础认知和通用能力，人工语料专门承载用户要求 Orbit 学会的内容；两部分合并训练。",
         }
 
     def _teacher_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1306,6 +1320,15 @@ class OrbitRuntime:
         active_profile_id = private_settings.get("active_profiles", {}).get(provider, "")
         stored_profile = next((row for row in stored_rows if row.get("id") == (requested_profile_id or active_profile_id)), {})
         api_key = str(payload.get("api_key", "")).strip() or str(stored_profile.get("api_key", "")).strip()
+        selected_mode, _ = self._training_mode(payload, require_valid=False)
+        policy = self._corpus_policy(selected_mode)
+        manual_present = bool(str(payload.get("text", "")).strip())
+        role_plan = (
+            f"人工与 AI 分工（必须执行）：{policy['mixed_strategy']}"
+            if manual_present else
+            f"当前没有人工语料；AI 需要负责基础认知、通用语言能力和基础任务，并说明用户之后可以加入自己的专属文献。"
+        )
+        teacher_plan = "\n".join(filter(None, [str(payload.get("corpus_plan", "")).strip(), role_plan]))
         teacher = TeacherConfig(
             base_url=str(payload.get("teacher_base_url", "https://api.deepseek.com")),
             model=str(payload.get("teacher_model", "deepseek-v4-flash")),
@@ -1313,7 +1336,7 @@ class OrbitRuntime:
             language=str(payload.get("language", "中文")),
             corpus_mode=("fine_tuning" if self._training_mode(payload, require_valid=False)[0] == "fine_tuning" else "pretraining"),
             training_round=self._training_round(payload, str(payload.get("base_model", "")).strip() or None),
-            corpus_plan=str(payload.get("corpus_plan", "")).strip(),
+            corpus_plan=teacher_plan,
             model_profile=self._teacher_model_profile(payload),
         )
         teacher.validate()
