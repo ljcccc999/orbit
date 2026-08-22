@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import json
+import math
 import os
 import re
 import select
@@ -29,7 +30,7 @@ from .identity import (
 )
 from .settings import OrbitSettings
 from .resources import TRAINING_MEMORY_RESERVE_GB, memory_is_critical, require_checkpoint_load_capacity, require_training_capacity, resource_snapshot
-from .teacher import TeacherConfig, generate_dataset
+from .teacher import TeacherConfig, corpus_statistics, generate_dataset, split_generated_corpus
 from .training_config import TrainingConfig
 
 
@@ -160,7 +161,9 @@ class OrbitRuntime:
                     "status", "phase", "step", "steps", "message", "model_id",
                     "teacher_model", "dataset", "assisted",
                     "generated_content_available", "generated_content_path",
-                    "generated_content_bytes", "training_mode", "training_round",
+                    "generated_content_bytes", "generated_content_characters",
+                    "generated_content_tokens", "generated_content_samples",
+                    "validation_samples", "validation_dataset", "training_mode", "training_round",
                 )
             }
         temporary = self.training_state_path.with_suffix(".tmp")
@@ -461,6 +464,8 @@ class OrbitRuntime:
             seq_len = max(seq_len, min(base.seq_len, 1024))
             steps = max(100, min(2000, round(steps * 1.5)))
             recommended_examples = min(50_000, max(recommended_examples, round(recommended_examples * 1.25)))
+        if use_recommended_examples:
+            data_units = recommended_examples
         warmup = max(10, min(200, steps // 10))
         checkpoint_every = max(25, min(250, steps // 5))
         config = base.with_overrides(
@@ -498,10 +503,47 @@ class OrbitRuntime:
         # rate and a bounded first pass are safer defaults than reusing the
         # from-scratch pretraining schedule.
         if requested_mode == "fine_tuning":
-            config = config.with_overrides(
-                learning_rate=min(config.learning_rate, 1e-4),
-                steps=max(60, min(config.steps, 600)),
+            if use_recommended_examples:
+                recommended_examples = {
+                    "fast": 50_000, "memory": 50_000,
+                    "balanced": 50_000, "quality": 50_000,
+                }[optimization_goal]
+                data_units = recommended_examples
+            # Chat SFT is measured by packed token coverage and dataset passes,
+            # not by an arbitrary fixed 600-step ceiling.  A pretrained 300M
+            # base needs conservative updates and a stable effective batch.
+            estimated_sft_tokens = max(
+                int(payload.get("text_bytes", 0) or 0),
+                data_units * 512,
             )
+            sft_passes = 1 if optimization_goal == "fast" else 3 if optimization_goal == "quality" else 2
+            sft_accum = 8 if preset == "300m" else max(8, config.grad_accum)
+            sft_steps = max(1, math.ceil(estimated_sft_tokens * sft_passes / max(1, config.seq_len * config.batch_size * sft_accum)))
+            config = config.with_overrides(
+                steps=sft_steps,
+                grad_accum=sft_accum,
+                learning_rate=1e-5 if optimization_goal == "quality" else 2e-5,
+                warmup_steps=max(1, round(sft_steps * 0.03)),
+                weight_decay=0.01,
+                checkpoint_every=max(100, min(1000, sft_steps // 5)),
+            )
+        else:
+            # From-scratch pretraining consumes packed byte tokens.  Recommend
+            # enough updates to cover the corpus rather than pretending that
+            # one generated document equals one optimizer update.
+            estimated_pretrain_tokens = max(
+                int(payload.get("text_bytes", 0) or 0),
+                data_units * 6_750 if bool(payload.get("assisted")) or use_recommended_examples else 0,
+            )
+            passes = 1 if optimization_goal in {"fast", "balanced", "memory"} else 2
+            coverage_steps = max(1, math.ceil(estimated_pretrain_tokens * passes / max(1, config.seq_len * config.batch_size * config.grad_accum)))
+            config = config.with_overrides(
+                steps=coverage_steps,
+                warmup_steps=max(10, round(coverage_steps * 0.03)),
+                checkpoint_every=max(100, min(2000, coverage_steps // 10)),
+            )
+        recommended_manual_chars = recommended_examples * (600 if requested_mode == "pretraining" else 350)
+        recommended_manual_words = max(1, round(recommended_manual_chars / 1.6))
         mode_valid = (
             bool(base_model)
             if requested_mode == "fine_tuning" or training_round > 1
@@ -519,6 +561,13 @@ class OrbitRuntime:
         estimated_sequences = text_bytes // max(1, requested_seq + 1) if text_bytes else 0
         effective_batch = requested_batch * requested_accum
         estimated_updates_per_corpus = max(1, (estimated_sequences + effective_batch - 1) // effective_batch) if estimated_sequences else 0
+        parameter_count = model.estimate_parameters()
+        nominal_parameters = {"300m": 300_000_000, "1b": 1_000_000_000, "3b": 3_000_000_000, "7b": 7_000_000_000, "14b": 14_000_000_000, "38b": 38_000_000_000}[preset]
+        target_pretraining_tokens = max(parameter_count, nominal_parameters) * 20
+        estimated_generated_tokens = text_bytes + (data_units * (6_750 if requested_mode == "pretraining" else 512) if bool(payload.get("assisted")) or use_recommended_examples else 0)
+        from_scratch_required_samples = math.ceil(target_pretraining_tokens / 6_750)
+        from_scratch_required_steps = math.ceil(target_pretraining_tokens / max(1, requested_seq * requested_batch * requested_accum))
+        canonical_from_scratch_steps = math.ceil(target_pretraining_tokens / (1024 * 1 * 8))
         advice: list[dict[str, str]] = []
         if requested_mode == "fine_tuning" and parent_preset in PRESETS and parent_preset != preset:
             advice.append({
@@ -572,6 +621,11 @@ class OrbitRuntime:
                 "zh": "微调不采用固定百分比：先保留基础知识，再根据领域、结构化任务、代码/数学、对话和身份的验证集表现动态补样；优先增加高质量、去重后且能改善验证集的类别。",
                 "en": "Fine-tuning uses no fixed percentages: preserve general knowledge, then adapt domain, structured-task, code/math, dialogue and identity data according to held-out validation; prioritize high-quality, deduplicated data that improves validation.",
             })
+            advice.append({
+                "severity": "info", "code": "chat_sft_recipe",
+                "zh": "约 300M 已预训练基础模型要获得基础聊天能力：最低约 5 万条、推荐 10 万条高质量指令/对话样本；序列 1024、Batch 1、梯度累计 8、学习率 1e-5～2e-5、训练 2 轮。10 万条、平均 512 token 时约 12,500 次优化器更新。",
+                "en": "For basic chat ability on an approximately 300M pretrained base: use at least 50k and preferably 100k high-quality instruction/dialogue samples; sequence 1,024, batch 1, accumulation 8, learning rate 1e-5–2e-5, for two passes. At 512 tokens per sample, 100k samples require about 12,500 optimizer updates.",
+            })
         else:
             mode_title = (
                 {"zh": "预训练第 1 次（文献为主 + 少量对话）", "en": "Pretraining round 1 (document-first + a small amount of dialogue)"}
@@ -601,6 +655,13 @@ class OrbitRuntime:
                     "severity": "warning", "code": "pretrain_small",
                     "zh": f"当前是从零预训练实验，不是微调：{requested_examples} 个 AI 样本和 {requested_steps} 步不足以训练出可靠的通用聊天机器人。建议使用更多样、更大规模的文献语料，并按 token 总量规划训练。",
                     "en": f"This is a from-scratch pretraining experiment, not fine-tuning: {requested_examples} AI samples and {requested_steps} steps are not enough for a reliable general chatbot. Use a much larger, more diverse corpus and plan by total tokens.",
+                })
+            if estimated_generated_tokens < target_pretraining_tokens:
+                ratio = estimated_generated_tokens / max(1, target_pretraining_tokens) * 100
+                advice.append({
+                    "severity": "error", "code": "pretrain_token_shortfall",
+                    "zh": f"按当前输入估算约 {estimated_generated_tokens:,} 个字节 token，只达到约 300M 从零预训练参考目标 {target_pretraining_tokens:,} token 的 {ratio:.4f}%。这可以验证流程，但不能据此承诺正常聊天。按当前每条约 6,750 token，需要约 {from_scratch_required_samples:,} 条独立样本。",
+                    "en": f"The current input is estimated at {estimated_generated_tokens:,} byte tokens, only {ratio:.4f}% of the {target_pretraining_tokens:,}-token reference target for from-scratch pretraining at this scale. This can validate the pipeline, but cannot promise normal chat. At about 6,750 tokens per document, roughly {from_scratch_required_samples:,} independent samples are required.",
                 })
             advice.append({
                 "severity": "info", "code": "pretrain_units",
@@ -638,10 +699,32 @@ class OrbitRuntime:
             },
             "dataset_estimate": {
                 "text_bytes": text_bytes,
+                "estimated_tokens": estimated_generated_tokens,
+                "target_pretraining_tokens": target_pretraining_tokens if requested_mode == "pretraining" else None,
+                "target_coverage_percent": round(estimated_generated_tokens / max(1, target_pretraining_tokens) * 100, 6) if requested_mode == "pretraining" else None,
+                "from_scratch_required_samples": from_scratch_required_samples if requested_mode == "pretraining" else None,
+                "from_scratch_required_steps": from_scratch_required_steps if requested_mode == "pretraining" else None,
                 "sequence_samples": estimated_sequences,
                 "effective_batch": effective_batch,
                 "updates_per_corpus": estimated_updates_per_corpus,
                 "note": "根据 UTF-8 字节数和序列长度估算；当前训练使用随机窗口，实际覆盖率不是固定遍历次数。",
+            },
+            "chat_ready_recipe": {
+                "recommended_path": "pretrained_base_then_sft",
+                "minimum_sft_samples": 50_000,
+                "recommended_sft_samples": 100_000,
+                "quality_sft_samples": 200_000,
+                "sequence_length": 1024,
+                "batch_size": 1,
+                "gradient_accumulation": 8,
+                "learning_rate_min": 1e-5,
+                "learning_rate_max": 2e-5,
+                "passes": 2,
+                "recommended_optimizer_steps": 12_500,
+                "from_scratch_target_tokens": target_pretraining_tokens,
+                "from_scratch_current_length_samples": from_scratch_required_samples,
+                "from_scratch_optimizer_steps": canonical_from_scratch_steps,
+                "tokenizer_warning": "当前 Orbit 自研 checkpoint 使用 UTF-8 字节 tokenizer；正常聊天优先使用已完成基础预训练且带 BPE/SentencePiece tokenizer 的兼容基础模型。",
             },
         }
         # Pre-training estimates are deliberately labeled as rough. Once a
@@ -740,7 +823,7 @@ class OrbitRuntime:
         return {
             "available": bool(content),
             "content": content,
-            "bytes": len(content.encode("utf-8")),
+            **corpus_statistics(content),
             "assisted": True,
             "model_id": state.get("model_id"),
             "run_id": state.get("run_id"),
@@ -1206,7 +1289,8 @@ class OrbitRuntime:
             temporary_dataset.write_text(text, encoding="utf-8")
             os.replace(temporary_dataset, dataset)
         training_dataset = self.datasets_root / f"training-corpus-{stamp}-{secrets.token_hex(3)}.txt"
-        training_text = text if ORBIT_TRAINING_ANCHOR in text else f"{ORBIT_TRAINING_ANCHOR}\n\n{text}\n\n{ORBIT_TRAINING_ANCHOR}\n"
+        source_text = dataset.read_text(encoding="utf-8")
+        training_text = source_text if ORBIT_TRAINING_ANCHOR in source_text else f"{ORBIT_TRAINING_ANCHOR}\n\n{source_text}\n\n{ORBIT_TRAINING_ANCHOR}\n"
         training_dataset.write_text(training_text, encoding="utf-8")
         resume_run_id = str(payload.get("_resume_run_id", "")).strip()
         run_id = resume_run_id or f"{stamp}-{secrets.token_hex(3)}"
@@ -1236,6 +1320,8 @@ class OrbitRuntime:
             "corpus_policy": self._corpus_policy(training_mode),
             "identity_training_injected": True,
             "dataset": str(dataset), "training_dataset": str(training_dataset),
+            "validation_dataset": str(payload.get("_validation_dataset_path", "")),
+            "dataset_statistics": dict(payload.get("_dataset_statistics") or {}),
             "training_config": train_cfg.__dict__, "device": requested_device,
             "step": int(existing_run.get("step", 0) or 0), "steps": train_cfg.steps,
             "loss": existing_run.get("loss"), "message": "正在继续训练" if resume_run_id else "正在启动训练",
@@ -1457,7 +1543,9 @@ class OrbitRuntime:
                 "loss": None, "message": "正在调用教师 API 生成训练语料", "model_id": None,
                 "teacher_model": teacher.model, "assisted": True,
                 "generated_content_available": False, "generated_content_path": "",
-                "generated_content_bytes": 0, "training_mode": selected_mode,
+                "generated_content_bytes": 0, "generated_content_characters": 0,
+                "generated_content_tokens": 0, "generated_content_samples": 0,
+                "validation_samples": 0, "validation_dataset": "", "training_mode": selected_mode,
                 "training_round": teacher.training_round,
                 "_started_monotonic": time.monotonic(),
             }
@@ -1479,11 +1567,15 @@ class OrbitRuntime:
                 # available for inspection and resume.
                 with partial_dataset.open("a", encoding="utf-8") as handle:
                     handle.write(chunk.strip() + "\n\n")
+                chunk_stats = corpus_statistics(chunk)
                 with self._state_lock:
                     self._training.update(
                         generated_content_available=True,
                         generated_content_path=str(partial_dataset),
                         generated_content_bytes=partial_dataset.stat().st_size,
+                        generated_content_characters=int(self._training.get("generated_content_characters", 0) or 0) + int(chunk_stats["characters"]),
+                        generated_content_tokens=partial_dataset.stat().st_size,
+                        generated_content_samples=current,
                         dataset=str(partial_dataset),
                         message=f"正在生成训练语料：{current}/{total}（已保存）",
                     )
@@ -1497,14 +1589,19 @@ class OrbitRuntime:
                 temporary = dataset.with_suffix(".tmp")
                 temporary.write_text(text, encoding="utf-8")
                 os.replace(temporary, dataset)
+                training_text, validation_text, dataset_stats = split_generated_corpus(text)
+                validation_dataset = self.datasets_root / f"teacher-{stamp}.validation.txt"
+                validation_tmp = validation_dataset.with_suffix(".tmp")
+                validation_tmp.write_text(validation_text, encoding="utf-8")
+                os.replace(validation_tmp, validation_dataset)
                 self.training_state_path.unlink(missing_ok=True)
                 # Manual corpus and teacher corpus are additive. Keep the
                 # teacher-only file for preview, and train on one combined
                 # corpus when the user supplied both kinds of content.
                 manual_text = str(payload.get("text", "")).strip()
                 combined_text = (
-                    f"{manual_text}\n\n--- ORBIT AI-ASSISTED CORPUS ---\n\n{text}"
-                    if manual_text else text
+                    f"{manual_text}\n\n--- ORBIT AI-ASSISTED CORPUS ---\n\n{training_text}"
+                    if manual_text else training_text
                 )
                 combined_dataset = self.datasets_root / f"training-input-{stamp}.txt"
                 combined_tmp = combined_dataset.with_suffix(".tmp")
@@ -1516,9 +1613,15 @@ class OrbitRuntime:
                         usage=usage, dataset=str(dataset), assisted=True,
                         generated_content_available=True, generated_content_path=str(dataset),
                         generated_content_bytes=len(text.encode("utf-8")),
+                        generated_content_characters=len(text), generated_content_tokens=len(text.encode("utf-8")),
+                        generated_content_samples=int(dataset_stats["samples"]),
+                        validation_samples=int(dataset_stats["validation_samples"]),
+                        validation_dataset=str(validation_dataset),
                     )
                 payload["_dataset_path"] = str(combined_dataset)
                 payload["_generated_dataset_path"] = str(dataset)
+                payload["_validation_dataset_path"] = str(validation_dataset)
+                payload["_dataset_statistics"] = dataset_stats
                 payload["_assisted"] = True
                 preset = str(payload.get("preset", "300m")).lower()
                 required = OrbitConfig.for_preset(preset).estimated_training_memory_gb()
@@ -1534,7 +1637,7 @@ class OrbitRuntime:
                     return
                 with self._state_lock:
                     self._training.update(status="preparing", message="内存已满足要求，正在启动本机训练")
-                self._run_local_training(payload, text)
+                self._run_local_training(payload, combined_text)
                 with self._state_lock:
                     self._training.update(usage=usage, dataset=str(dataset))
             except InterruptedError as exc:

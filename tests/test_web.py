@@ -39,7 +39,11 @@ def test_reset_form_balanced_recommendation_is_coupled_to_recommended_samples(tm
     })
     assert recommendation["optimization_goal"] == "balanced"
     assert recommendation["recommended_examples"] == 2000
-    assert recommendation["config"]["steps"] == 2000
+    assert recommendation["config"]["steps"] == 26368
+    estimate = recommendation["training_advice"]["dataset_estimate"]
+    assert estimate["target_pretraining_tokens"] > 5_000_000_000
+    assert estimate["target_coverage_percent"] < 1
+    assert recommendation["training_advice"]["chat_ready_recipe"]["recommended_sft_samples"] == 100_000
 
     fast = runtime.training_recommendation({
         "preset": "300m",
@@ -60,7 +64,7 @@ def test_reset_form_balanced_recommendation_is_coupled_to_recommended_samples(tm
         "use_recommended_examples": True,
     })
     assert fast["estimated_training_seconds"] < memory["estimated_training_seconds"]
-    assert fast["config"]["steps"] == 800
+    assert fast["config"]["steps"] == 36915
     assert "applyOptimizationRecommendation" in PAGE
     assert "$('optimizationGoal')?.addEventListener('change',()=>{manualConfigEdit=false;scheduleRecommendation()})" in PAGE
 
