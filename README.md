@@ -54,7 +54,7 @@ Download the current [macOS universal app](https://github.com/ljcccc999/orbit/re
 
 After the first launch, Orbit starts with the user's login. Closing or minimizing the window leaves Orbit in the macOS menu bar, Windows notification area, or Linux system tray and keeps the local API available. Choose **Quit Orbit** from that menu to stop the API and disable automatic startup; manually opening Orbit again re-enables it.
 
-The **Check for updates** control inside Orbit checks the official release channel and can update the local Orbit runtime from inside the app. The service restarts automatically after an update; models, conversations, API keys, and training history remain in the user's local data directory.
+The lower-left update controls have separate actions: **Check for updates** only checks the official release channel, while **Install now** downloads, verifies, and queues the latest release from inside Orbit. If training is active, installation waits for a safe checkpoint and then restarts the local service; models, conversations, API keys, and training history remain in the user's local data directory.
 
 The current public builds are not Developer ID/Authenticode signed or notarized. macOS Gatekeeper or Windows SmartScreen may therefore require an explicit first-open confirmation. Removing that system warning requires platform signing certificates; it is not something application code can safely bypass.
 

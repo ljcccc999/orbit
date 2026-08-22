@@ -203,6 +203,9 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "/api/training/generated-content" in PAGE
     assert "AI-generated content" in PAGE
     assert "function actionPrompt" in PAGE
+    assert 'id="installUpdates"' in PAGE
+    assert "function installFromSidebar" in PAGE
+    assert "/api/update/install" in PAGE
     assert "PAGE = PAGE.replace" not in PAGE
     assert 'id="memoryInput"' in PAGE
     assert 'id="saveMemory"' in PAGE

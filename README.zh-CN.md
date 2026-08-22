@@ -54,7 +54,7 @@ Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对�
 
 首次启动后，Orbit 会随用户登录自动运行。关闭或最小化窗口时，Orbit 会继续留在 macOS 右上角菜单栏、Windows 通知区域或 Linux 系统托盘中，本地 API 保持可用。只有从该菜单选择“退出 Orbit”，才会停止 API 并取消自动启动；以后手动打开 Orbit 会重新启用。
 
-Orbit 内部的“检查更新”按钮会检查官方 Release，并直接在 App 内更新 Orbit 本地运行时。更新后本机会自动重启服务；模型、对话、API Key 和训练历史仍保留在用户自己的数据目录中。
+左下角更新区域现在分为两个按钮：“检查更新”只检查官方 Release；“立即安装”会在 App 内下载、校验并排队安装最新版本。如果正在训练，安装会等待安全 checkpoint 保存后再重启本机服务；模型、对话、API Key 和训练历史仍保留在用户自己的数据目录中。
 
 当前公开构建还没有 Developer ID/Authenticode 正式签名和公证，因此 macOS Gatekeeper 或 Windows SmartScreen 在首次打开时可能要求用户明确确认。彻底去掉系统提示需要对应平台的代码签名证书，程序代码不能安全绕过。
 
