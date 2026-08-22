@@ -11,7 +11,7 @@ from typing import Callable, Optional
 
 import torch
 
-from .config import OrbitConfig
+from .config import BYTE_VOCAB_SIZE, OrbitConfig
 from .identity import ORBIT_SYSTEM_PROMPT, ORBIT_TRAINING_ANCHOR
 from .model import OrbitForCausalLM
 from .training_config import TrainingConfig
@@ -119,7 +119,22 @@ def run_training(
     start_step = 0
     if resume:
         state = torch.load(resume, map_location="cpu")
-        model.load_state_dict(state["model"])
+        saved_config = state.get("config") or {}
+        saved_vocab = int(saved_config.get("vocab_size", cfg.vocab_size))
+        weights = state["model"]
+        if saved_vocab != cfg.vocab_size:
+            # Checkpoints created before the byte-vocabulary fix used a 32K
+            # output head even though their targets were UTF-8 bytes. Keep
+            # those files loadable for secondary training by retaining only
+            # the byte rows; never delete or rewrite the original checkpoint.
+            if saved_vocab != 32_000 or cfg.vocab_size != BYTE_VOCAB_SIZE:
+                raise ValueError("父模型词表与当前训练管线不兼容，请从头训练同一规模模型")
+            weights = dict(weights)
+            for key in ("backbone.embedding.weight", "lm_head.weight"):
+                value = weights.get(key)
+                if value is not None and value.shape[0] >= BYTE_VOCAB_SIZE:
+                    weights[key] = value[:BYTE_VOCAB_SIZE].contiguous()
+        model.load_state_dict(weights)
         if not resume_weights_only and "optimizer" in state:
             optimizer.load_state_dict(state["optimizer"])
         if not resume_weights_only and "scheduler" in state:

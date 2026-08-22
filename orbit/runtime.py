@@ -23,8 +23,6 @@ from .memory import LongTermMemory
 from .identity import (
     ORBIT_SYSTEM_PROMPT,
     ORBIT_TRAINING_ANCHOR,
-    identity_challenge,
-    identity_response,
 )
 from .settings import OrbitSettings
 from .resources import TRAINING_MEMORY_RESERVE_GB, memory_is_critical, require_checkpoint_load_capacity, require_training_capacity, resource_snapshot
@@ -727,6 +725,7 @@ class OrbitRuntime:
             "completed_at": None, "model_id": model_id, "model_name": display_name,
             "preset": preset, "parameters": cfg.estimate_parameters(), "parent_model": parent_model,
             "assisted": bool(payload.get("_assisted")), "training_goal": str(payload.get("instruction", "")),
+            "corpus_mode": "mixed" if parent_model else "document",
             "identity_training_injected": True,
             "dataset": str(dataset), "training_dataset": str(training_dataset),
             "training_config": train_cfg.__dict__, "device": requested_device,
@@ -907,6 +906,7 @@ class OrbitRuntime:
             model=str(payload.get("teacher_model", "deepseek-v4-flash")),
             instruction=str(payload.get("instruction", "")), examples=int(payload.get("examples", 20)),
             language=str(payload.get("language", "中文")),
+            corpus_mode=("mixed" if str(payload.get("base_model", "")).strip() else "document"),
             model_profile=self._teacher_model_profile(payload),
         )
         teacher.validate()
@@ -921,14 +921,14 @@ class OrbitRuntime:
             self._delete_after_stop = False
             self._training = {
                 "status": "generating", "phase": "generation", "step": 0, "steps": teacher.examples,
-                "loss": None, "message": "正在调用教师 API 生成训练样本", "model_id": None,
+                "loss": None, "message": "正在调用教师 API 生成训练语料", "model_id": None,
                 "teacher_model": teacher.model,
                 "_started_monotonic": time.monotonic(),
             }
 
         def generated(current: int, total: int) -> None:
             with self._state_lock:
-                self._training.update(step=current, steps=total, message=f"正在生成训练样本：{current}/{total}")
+                self._training.update(step=current, steps=total, message=f"正在生成训练语料：{current}/{total}")
 
         def worker() -> None:
             try:
@@ -1489,14 +1489,6 @@ class OrbitRuntime:
             raise ValueError("消息不能为空")
         if not 1 <= max_tokens <= 2048:
             raise ValueError("max_tokens 必须在 1 到 2048 之间")
-        if identity_challenge(prompt):
-            resolved_model = model_id or self.active_model_id or (self.list_models()[0]["id"] if self.list_models() else "orbit")
-            resolved_name = self._model_metadata(resolved_model).get("name", resolved_model) if resolved_model != "orbit" else "Orbit"
-            return {
-                "model": resolved_model,
-                "model_name": resolved_name,
-                "content": identity_response(prompt),
-            }
         memory_context = self.memory.system_context()
         if model_id:
             self.load_model(model_id)
@@ -1512,7 +1504,7 @@ class OrbitRuntime:
             metadata = self._model_metadata(str(self._model_id))
             self._model.stdin.write(json.dumps({
                 "command": "chat", "prompt": prompt, "max_tokens": max_tokens,
-                "temperature": temperature, "system_prompt": ORBIT_IDENTITY,
+                "temperature": temperature,
                 "memory_context": memory_context,
                 "model_name": metadata.get("name", self._model_id),
             }, ensure_ascii=False) + "\n")

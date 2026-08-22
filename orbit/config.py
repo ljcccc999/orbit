@@ -5,9 +5,15 @@ import os
 import subprocess
 
 
+# The current local trainer is deliberately tokenizer-free: it trains on
+# UTF-8 bytes.  Keep the model vocabulary aligned with byte_batch() instead
+# of allocating a 32K output head whose classes can never be targets.
+BYTE_VOCAB_SIZE = 256
+
+
 @dataclass
 class OrbitConfig:
-    vocab_size: int = 256
+    vocab_size: int = BYTE_VOCAB_SIZE
     d_model: int = 256
     n_layers: int = 8
     n_heads: int = 8
@@ -42,7 +48,7 @@ class OrbitConfig:
     def one_billion(cls) -> "OrbitConfig":
         """Approximate 1B architecture description without allocating it."""
         return cls(
-            vocab_size=32_000, d_model=1536, n_layers=28,
+            vocab_size=BYTE_VOCAB_SIZE, d_model=1536, n_layers=28,
             n_heads=16, head_dim=96, latent_dim=512,
             expert_hidden=1280, n_routed_experts=8, top_k=2,
             n_shared_experts=1, attnres_block_size=4,
@@ -53,12 +59,12 @@ class OrbitConfig:
     @classmethod
     def presets(cls) -> dict[str, "OrbitConfig"]:
         return {
-            "300m": cls(vocab_size=32_000, d_model=768, n_layers=28, n_heads=12, head_dim=64, latent_dim=256, expert_hidden=768, n_routed_experts=8, max_seq_len=2048),
+            "300m": cls(vocab_size=BYTE_VOCAB_SIZE, d_model=768, n_layers=28, n_heads=12, head_dim=64, latent_dim=256, expert_hidden=768, n_routed_experts=8, max_seq_len=2048),
             "1b": cls.one_billion(),
-            "3b": cls(vocab_size=32_000, d_model=2048, n_layers=32, n_heads=16, head_dim=128, latent_dim=1024, expert_hidden=2048, n_routed_experts=8, max_seq_len=4096),
-            "7b": cls(vocab_size=32_000, d_model=3072, n_layers=36, n_heads=24, head_dim=128, latent_dim=1024, expert_hidden=4096, n_routed_experts=8, max_seq_len=4096),
-            "14b": cls(vocab_size=32_000, d_model=4096, n_layers=42, n_heads=32, head_dim=128, latent_dim=1536, expert_hidden=4608, n_routed_experts=8, max_seq_len=8192),
-            "38b": cls(vocab_size=32_000, d_model=6144, n_layers=48, n_heads=48, head_dim=128, latent_dim=3072, expert_hidden=5888, n_routed_experts=8, max_seq_len=8192),
+            "3b": cls(vocab_size=BYTE_VOCAB_SIZE, d_model=2048, n_layers=32, n_heads=16, head_dim=128, latent_dim=1024, expert_hidden=2048, n_routed_experts=8, max_seq_len=4096),
+            "7b": cls(vocab_size=BYTE_VOCAB_SIZE, d_model=3072, n_layers=36, n_heads=24, head_dim=128, latent_dim=1024, expert_hidden=4096, n_routed_experts=8, max_seq_len=4096),
+            "14b": cls(vocab_size=BYTE_VOCAB_SIZE, d_model=4096, n_layers=42, n_heads=32, head_dim=128, latent_dim=1536, expert_hidden=4608, n_routed_experts=8, max_seq_len=8192),
+            "38b": cls(vocab_size=BYTE_VOCAB_SIZE, d_model=6144, n_layers=48, n_heads=48, head_dim=128, latent_dim=3072, expert_hidden=5888, n_routed_experts=8, max_seq_len=8192),
         }
 
     @classmethod

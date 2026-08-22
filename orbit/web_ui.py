@@ -13,7 +13,7 @@ PAGE = r'''<!doctype html>
 <aside class="sidebar"><div class="brand"><img src="/static/orbit-logo-transparent.png" alt=""><b>Orbit</b><span class="local"></span></div><nav class="nav">
 <button data-page="chat" class="active"><span class="icon">◉</span><span data-i18n="navChat">Chat</span></button><button data-page="models"><span class="icon">◇</span><span data-i18n="navModels">Models</span></button><button data-page="train"><span class="icon">↗</span><span data-i18n="navTrain">Training</span></button><button data-page="runs"><span class="icon">≡</span><span data-i18n="navRuns">Training history</span></button><button data-page="community"><span class="icon">◎</span><span data-i18n="navCommunity">Community</span></button><button data-page="api"><span class="icon">⌘</span><span>API</span></button></nav><div class="side-bottom"><div class="side-status"><span class="local"></span><span data-i18n="localOffline">Local · offline inference</span></div><button class="button ghost" id="checkUpdates" style="width:100%;margin-bottom:8px" data-i18n="checkUpdates">Check for updates</button><span id="updateStatus" class="help" style="display:block;margin-bottom:8px"></span><select id="language" class="language"><option value="system">Follow system</option><option value="en">English</option><option value="zh">中文</option></select></div></aside>
 <main class="workspace"><header class="toolbar"><div><div class="trail">Orbit / <span id="trail">Chat</span></div><h1 id="pageTitle">Chat</h1></div><div class="toolbar-right"><span class="chip" id="memoryChip">— GB RAM</span><span class="chip" id="modelChip" data-i18n="idle">Idle</span></div></header><div class="content" id="content">
-<section id="chat" class="page active"><div class="layout"><div class="panel chat-panel"><div class="panel-head"><div><h2 data-i18n="chatTitle">Local conversation</h2><p data-i18n="chatDesc">The model loads only when a message arrives.</p></div><div class="actions"><button class="button" id="newChat" data-i18n="newChat">New chat</button><button class="button ghost" id="unloadModel" data-i18n="unload">Unload model</button><button class="button ghost" id="loadActiveModel" data-i18n="load" hidden>Load model</button></div></div><div class="messages" id="messages"><div class="identity"><img src="/static/orbit-logo-transparent.png" alt=""><b>Orbit</b><span class="muted" data-i18n="identityDesc">Local, user-trained AI</span><button class="button" id="askIdentity" data-i18n="askIdentity">Who are you?</button></div></div><div class="composer"><select id="chatModel" style="width:180px" aria-label="Model"></select><input id="prompt" data-i18n-placeholder="messagePlaceholder" placeholder="Message Orbit"><button class="button primary" id="sendButton" data-i18n="send">Send</button></div></div><aside class="panel panel-pad inspector"><h3 class="section-title" data-i18n="conversationHistory">Conversation history</h3><div id="conversationList" class="parameter-list"></div><div class="divider"></div><h3 class="section-title" data-i18n="runtime">Runtime</h3><div class="metric"><b id="activeModel">Orbit</b><span data-i18n="activeModelHelp">Active model or automatic selection</span></div><div id="loadingStatus"></div><div class="notice" data-i18n="memoryNotice">Weights unload automatically after idle time.</div></aside></div></section>
+<section id="chat" class="page active"><div class="layout"><div class="panel chat-panel"><div class="panel-head"><div><h2 data-i18n="chatTitle">Local conversation</h2><p data-i18n="chatDesc">The model loads only when a message arrives.</p></div><div class="actions"><button class="button" id="newChat" data-i18n="newChat">New chat</button><button class="button ghost" id="unloadModel" data-i18n="unload">Unload model</button><button class="button ghost" id="loadActiveModel" data-i18n="load" hidden>Load model</button></div></div><div class="messages" id="messages"><div class="identity"><img src="/static/orbit-logo-transparent.png" alt=""><b>Orbit</b><span class="muted" data-i18n="identityDesc">Local, user-trained AI</span><button class="button" id="askIdentity" data-i18n="askIdentity">Who are you?</button></div></div><div class="composer"><select id="chatModel" style="width:180px" aria-label="Model"></select><input id="prompt" data-i18n-placeholder="messagePlaceholder" placeholder="Message Orbit" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"><button class="button primary" id="sendButton" data-i18n="send">Send</button></div></div><aside class="panel panel-pad inspector"><h3 class="section-title" data-i18n="conversationHistory">Conversation history</h3><div id="conversationList" class="parameter-list"></div><div class="divider"></div><h3 class="section-title" data-i18n="runtime">Runtime</h3><div class="metric"><b id="activeModel">Orbit</b><span data-i18n="activeModelHelp">Active model or automatic selection</span></div><div id="loadingStatus"></div><div class="notice" data-i18n="memoryNotice">Weights unload automatically after idle time.</div></aside></div></section>
 <section id="models" class="page"><div class="panel"><div class="panel-head"><div><h2 data-i18n="modelsTitle">Local models</h2><p data-i18n="modelsDesc">Load, train again, or export a model.</p></div><button class="button" id="refreshModels" data-i18n="refresh">Refresh</button></div><div class="model-table"><div class="row header"><span data-i18n="model">Model</span><span data-i18n="scale">Scale</span><span data-i18n="lineage">Lineage</span><span data-i18n="actions">Actions</span></div><div id="modelsTable"></div></div></div></section>
 <section id="train" class="page"><div class="layout"><div class="panel panel-pad"><div class="form-stack"><div><h2 class="section-title" data-i18n="trainTitle">Train a local model</h2><p class="small muted" data-i18n="trainDesc">Create from scratch or continue from a checkpoint.</p></div><div class="form-grid"><div class="field"><label data-i18n="modelName">Custom model name</label><input id="modelName" placeholder="my-orbit"><span class="help" data-i18n="modelNameHelp">Used in files and API; identity remains Orbit.</span></div><div class="field"><label data-i18n="baseModel">Base model</label><select id="baseModel"><option value="">Start from scratch</option></select><span class="help" data-i18n="baseModelHelp">Choose a model for secondary training.</span></div></div><div class="form-grid"><div class="field"><label data-i18n="modelScale">Model scale</label><select id="preset"><option value="300m">300M</option><option value="1b">1B</option><option value="3b">3B</option><option value="7b">7B</option><option value="14b">14B</option><option value="38b">38B</option></select><span class="help" data-i18n="scaleHelp">Controls architecture and total parameters.</span></div><div class="field"><label data-i18n="device">Training device</label><select id="device"><option value="auto">Auto</option><option value="mps">Apple GPU (MPS)</option><option value="cuda">NVIDIA GPU (CUDA)</option><option value="cpu">CPU</option></select><span class="help" data-i18n="deviceHelp">Auto selects the fastest accelerator.</span></div></div><div class="field"><label data-i18n="dataLanguage">Training data language</label><select id="dataLanguage"><option value="bilingual">中文 + English</option><option value="zh">中文</option><option value="en">English</option></select><span class="help" data-i18n="dataLanguageHelp">Bilingual mode keeps Chinese and English examples in the same run.</span></div><div class="field"><label data-i18n="trainingContent">Training content</label><textarea id="corpus" data-i18n-placeholder="trainingPlaceholder"></textarea><span class="help" data-i18n="contentHelp">Exact content is saved in training history.</span></div>
 <details class="subsection"><summary data-i18n="advanced">Advanced training parameters</summary><div id="autoTuneNote" class="notice" style="margin-top:12px" data-i18n="autoTunePending"></div><div class="advanced form-grid">
@@ -124,11 +124,7 @@ PAGE = PAGE.replace(
     ".orbit-status-button{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 9px 4px 5px;background:rgba(255,255,255,.66);color:var(--ink);font-size:11px;font-weight:700;-webkit-app-region:no-drag}.orbit-status-button img{width:20px;height:20px;object-fit:contain}.orbit-status-button:hover{background:rgba(255,255,255,.9)}.content,.page,.layout,.panel,#train,.training-content,.run-list,.run-detail,.messages,.community-detail,.community-list{-webkit-app-region:no-drag}</style>",
     1,
 )
-PAGE = PAGE.replace(
-    "</script></body></html>",
-    """let orbitWindowWasAway=false;window.addEventListener('blur',()=>{orbitWindowWasAway=true});window.addEventListener('focus',()=>{if(orbitWindowWasAway){orbitWindowWasAway=false;setTimeout(()=>{if(!['preparing','generating','waiting_memory','needs_memory','running','stopping'].includes(system?.training?.status))resetTrainingForm()},0)}});document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!['preparing','generating','waiting_memory','needs_memory','running','stopping'].includes(system?.training?.status))setTimeout(()=>resetTrainingForm(),0)});</script></body></html>""",
-    1,
-)
+# Do not reset the training form on window focus or visibility changes.
 PAGE = PAGE.replace("const result=await request('/api/update/install',{method:'POST',body:'{}'});$('updateStatus').textContent=t('updateInstalling');toast(t('updateInstalling'));", "const result=await request('/api/update/install',{method:'POST',body:'{}'});const queued=result.status==='queued_after_training';$('updateStatus').textContent=t(queued?'updateQueued':'updateInstalling');toast(t(queued?'updateQueued':'updateInstalling'));")
 PAGE = PAGE.replace('<button data-page="api"><span class="icon">⌘</span><span>API</span></button></nav>', '<button data-page="api"><span class="icon">⌘</span><span>API</span></button><button data-page="settings"><span class="icon">⚙</span><span data-i18n="navSettings">Settings</span></button></nav>')
 PAGE = PAGE.replace('</section>\n</div></main></div><div class="toast" id="toast"></div>', '</section>\n<section id="settings" class="page"><div class="layout"><div class="panel panel-pad"><h2 class="section-title" data-i18n="settingsTitle">Settings</h2><p class="small muted" data-i18n="settingsDesc">Control background updates for the local Orbit service.</p><label class="check" style="margin-top:18px"><input id="autoUpdate" type="checkbox"><span data-i18n="autoUpdate">Automatically update Orbit</span></label><p class="help" data-i18n="autoUpdateHelp">When enabled, Orbit checks the official release channel in the background. During training, it waits until the checkpoint is saved.</p><div id="versionStatus" class="status" style="margin-top:16px"></div><div class="actions" style="margin-top:10px"><button class="button" id="settingsCheckUpdates" data-i18n="checkNow">Check for updates</button><button class="button primary" id="settingsUpdateNow" data-i18n="updateNow">Update now</button></div></div></div></section>\n</div></main></div><div class="toast" id="toast"></div>')
@@ -332,4 +328,101 @@ PAGE = PAGE.replace(
 PAGE = PAGE.replace(
     "</script></body></html>",
     """function setupOrbitSidebar(){const side=document.querySelector('.sidebar'),nav=side?.querySelector('.nav'),history=document.getElementById('conversationList'),target=document.getElementById('sidebarConversationList');if(!side||!nav||!history||!target)return;target.appendChild(history);const heading=document.querySelector('#chat .inspector [data-i18n=conversationHistory]');const divider=heading?.nextElementSibling;heading?.remove();divider?.remove();const chat=nav.querySelector('[data-page=chat] span:last-child');if(chat){chat.dataset.i18n='newChat';chat.textContent=currentLang==='zh'?'新对话':'New chat'}const plugins=document.createElement('button');plugins.dataset.sideAction='plugins';plugins.innerHTML='<span class=\"icon\">✦</span><span data-i18n=\"navPlugins\">Plugins</span>';const train=nav.querySelector('[data-page=train]');if(train)nav.insertBefore(plugins,train);const actions=side.querySelectorAll('[data-side-action]');actions.forEach(button=>{button.onclick=()=>{const action=button.dataset.sideAction;if(action==='new')newConversation();else if(action==='search')document.getElementById('prompt')?.focus();else if(action==='plugins')toast(currentLang==='zh'?'插件入口已保留，当前可直接使用训练和 API。':'The Plugins entry is reserved; Training and API are available now.')}});applyLanguage()}setupOrbitSidebar();</script></body></html>""",
+)
+
+# Keep a user's in-progress training form intact after a successful start. The
+# form is reset by the terminal training-state handler or by the explicit
+# Reset form button, not by a normal request or window focus change.
+PAGE = PAGE.replace("resetTrainingForm();toast(t('trainingStarted'))", "toast(t('trainingStarted'))")
+PAGE = PAGE.replace("resetTrainingForm();toast(t('generating'))", "toast(t('generating'))")
+PAGE = PAGE.replace("setTimeout(()=>{if(typeof resetTrainingForm==='function')resetTrainingForm()},0);", "")
+
+# The model page and chat page use the same state-driven load/unload action.
+# This replacement is appended after the original page script so all later
+# refreshSystem() calls resolve these functions.
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    """function orbitModelBusy(id){const s=system?.loading?.status;return ['queued','loading'].includes(s)&&system.loading.model_id===id}async function unloadModelFromModels(){try{await request('/api/models/unload',{method:'POST',body:'{}'});await refreshSystem();toast(t('modelUnloaded'))}catch(e){toast(e.message)}}async function toggleModel(encoded){const id=decodeURIComponent(encoded);if(orbitModelBusy(id))return;const model=(system?.models||[]).find(x=>x.id===id);if(!model)return;if(model.active)return unloadModelFromModels();try{await request('/api/models/load',{method:'POST',body:JSON.stringify({model:id})});startLoadingPoll();await refreshSystem()}catch(e){toast(e.message)}}function renderModels(rows){const box=$('modelsTable');if(!rows.length){box.innerHTML=`<div class=\"empty\">${t('noModels')}</div>`;return}const busy=system?.loading&&['queued','loading'].includes(system.loading.status);box.innerHTML=rows.map(x=>{const active=Boolean(x.active),loading=orbitModelBusy(x.id),disabled=busy&&!loading,buttonLabel=loading?(currentLang==='zh'?'加载中…':'Loading…'):(active?t('unload'):t('load'));return `<div class=\"row\"><div class=\"row-title\"><b>${esc(x.name||x.id)}</b><span>${esc(x.id)} · ${(x.size_bytes/1048576).toFixed(1)} MB · Orbit</span></div><div><span class=\"badge ${active?'green':''}\">${active?t('loaded'):esc(String(x.preset||'custom').toUpperCase())}</span><div class=\"small muted\">${x.parameters?Number(x.parameters).toLocaleString():'—'}</div></div><div class=\"small\">${x.parent_model?esc(x.parent_model):t('none')}<br><span class=\"muted\">${(x.training_runs||[]).length} runs</span></div><div class=\"actions\"><button class=\"button ${active?'ghost':''}\" ${disabled?'disabled':''} onclick=\"toggleModel('${eid(x.id)}')\">${buttonLabel}</button><button class=\"button danger\" onclick=\"deleteModel('${eid(x.id)}')\">${currentLang==='zh'?'删除模型':'Delete model'}</button><button class=\"button\" onclick=\"continueTraining('${eid(x.id)}')\">${t('continueTrain')}</button><button class=\"button\" onclick=\"uploadModel('${eid(x.id)}')\">${currentLang==='zh'?'上传到 Hub':'Upload to Hub'}</button><button class=\"button\" onclick=\"exportModel('${eid(x.id)}','server')\">${t('serverExport')}</button><button class=\"button ghost\" onclick=\"exportModel('${eid(x.id)}','ollama')\">${t('ollamaExport')}</button></div></div>`}).join('')}function updateModelActions(){const loaded=Boolean(system?.resources?.model_loaded),hasModel=Boolean(system?.models?.length),busy=Boolean(system?.loading&&['queued','loading'].includes(system.loading.status));$('unloadModel').hidden=!loaded;$('loadActiveModel').hidden=loaded||!hasModel;$('unloadModel').disabled=busy;$('loadActiveModel').disabled=busy} </script></body></html>""",
+    1,
+)
+
+# The composer must never predict or write an answer into the input. Disable
+# browser/OS form completion hints and make Enter the only keyboard action that
+# can send; IME composition (including Chinese candidate selection) is ignored.
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    """const orbitPrompt=$('prompt');let orbitComposing=false;orbitPrompt?.addEventListener('compositionstart',()=>{orbitComposing=true});orbitPrompt?.addEventListener('compositionend',()=>{orbitComposing=false});if(orbitPrompt)orbitPrompt.onkeydown=e=>{if(e.key==='Enter'&&!e.repeat&&!orbitComposing&&!e.isComposing){e.preventDefault();e.stopPropagation();sendPrompt()}}; </script></body></html>""",
+    1,
+)
+
+# Make the distinction explicit: ordinary local runs are supervised training
+# on the text the user supplies, not silent ingestion of other conversations.
+PAGE = PAGE.replace(
+    "Create from scratch or continue from a checkpoint. Data stays local unless AI assistance is enabled.",
+    "Create from scratch or continue from a checkpoint. This is supervised training on the text you provide; Orbit never silently reads other user conversations.",
+)
+PAGE = PAGE.replace(
+    "从零创建或选择 checkpoint 二次训练。除非启用 AI 辅助，否则数据不会离开本机。",
+    "从零创建或选择 checkpoint 二次训练。这是基于你提供文本的监督训练；Orbit 不会静默读取其他用户的对话。",
+)
+PAGE = PAGE.replace(
+    "已使用 Orbit 身份提示生成本机回答",
+    "已完成本机生成",
+).replace(
+    "Generated locally with Orbit identity instructions",
+    "Generated locally by the loaded model",
+)
+
+# Training is document/corpus-first.  Import stays local to the browser and
+# accepts cleaned text formats; Orbit never downloads literature or reads chat
+# history implicitly.
+PAGE = PAGE.replace(
+    "language:$('teacherLanguage').value,model_profile:",
+    "language:$('teacherLanguage').value,corpus_mode:($('baseModel').value?'mixed':'document'),model_profile:",
+)
+PAGE = PAGE.replace(
+    "trainDesc:'Create from scratch or continue from a checkpoint.'",
+    "trainDesc:'Create from scratch or continue from a checkpoint using documents, books, technical references or code you provide. Chat data is not imported automatically.'",
+).replace(
+    "trainDesc:'从零创建或选择 checkpoint 二次训练。除非启用 AI 辅助，否则数据不会离开本机。'",
+    "trainDesc:'从零创建或选择 checkpoint 二次训练，使用你提供的文献、技术资料或代码。不会自动导入聊天数据。'",
+).replace(
+    "assistDesc:'Describe the desired behavior. The teacher receives the selected model parameters and training configuration, then creates size-appropriate samples.'",
+    "assistDesc:'Describe the knowledge or coding corpus you need. The teacher receives the selected model parameters and creates document-style passages or code, not dialogue.'",
+).replace(
+    "assistDesc:'描述希望 AI 成为什么样。教师 AI 会收到所选模型的参数量和训练配置，再生成适合该规模的样本。'",
+    "assistDesc:'描述需要生成的知识或代码语料。教师 AI 会收到模型参数和训练配置，生成文档段落或代码，不生成对话。'",
+).replace(
+    "trainingContent:'Training content'",
+    "trainingContent:'Document corpus'",
+).replace(
+    "trainingContent:'训练内容'",
+    "trainingContent:'文献 / 知识语料'",
+).replace(
+    "trainingPlaceholder:'Paste or type training text here…'",
+    "trainingPlaceholder:'Paste cleaned papers, books, documentation or code here…'",
+).replace(
+    "trainingPlaceholder:'粘贴或输入训练文本…'",
+    "trainingPlaceholder:'粘贴清洗后的论文、书籍、技术文档或代码…'",
+).replace(
+    "contentHelp:'Exact content is saved in training history.'",
+    "contentHelp:'Only the corpus you provide is used; Orbit does not silently import conversations.'",
+).replace(
+    "contentHelp:'原文会保存在训练历史中。'",
+    "contentHelp:'只使用你提供的语料；Orbit 不会静默导入对话。'",
+)
+PAGE = PAGE.replace(
+    '<textarea id="corpus" data-i18n-placeholder="trainingPlaceholder"></textarea>',
+    '<textarea id="corpus" data-i18n-placeholder="trainingPlaceholder"></textarea><label class="button ghost" for="corpusFile" style="width:max-content" data-i18n="importCorpus">导入本地文献/代码</label><input id="corpusFile" type="file" accept=".txt,.md,.markdown,.json,.jsonl,.csv" hidden><span class="help" data-i18n="importCorpusHelp">仅读取你选择的本地文本文件；不会联网抓取文献或读取聊天记录。</span>',
+)
+PAGE = PAGE.replace(
+    "navSettings:'Settings'",
+    "navSettings:'Settings',importCorpus:'Import local corpus',importCorpusHelp:'Reads only a local text file you select; it does not fetch literature or read conversations.'",
+).replace(
+    "navSettings:'设置'",
+    "navSettings:'设置',importCorpus:'导入本地文献/代码',importCorpusHelp:'只读取你选择的本地文本文件；不会联网抓取文献或读取聊天记录。'",
+)
+PAGE = PAGE.replace(
+    "const orbitPrompt=$('prompt');let orbitComposing=false;",
+    "const corpusFile=$('corpusFile');corpusFile?.addEventListener('change',()=>{const file=corpusFile.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{$('corpus').value=$('corpus').value.trim()?$('corpus').value+'\\n\\n'+String(reader.result||''):String(reader.result||'');scheduleRecommendation();corpusFile.value=''};reader.onerror=()=>toast(currentLang==='zh'?'本地语料读取失败。':'Could not read the local corpus.');reader.readAsText(file)});const orbitPrompt=$('prompt');let orbitComposing=false;",
 )

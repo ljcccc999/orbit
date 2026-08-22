@@ -78,6 +78,7 @@ def create_job_bundle(
             "instruction": str(assistant.get("instruction", "")),
             "examples": int(assistant.get("examples", 20)),
             "language": str(assistant.get("language", data_language)),
+            "corpus_mode": str(assistant.get("corpus_mode", "document")),
             "model_profile": assistant.get("model_profile") or {},
         }
         if not assistant_config["base_url"] or not assistant_config["model"] or not assistant_config["instruction"]:

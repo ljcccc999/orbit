@@ -19,6 +19,7 @@ class TeacherConfig:
     instruction: str = ""
     examples: int = 20
     language: str = "中文"
+    corpus_mode: str = "document"
     model_profile: dict | None = None
 
     def endpoint(self) -> str:
@@ -41,6 +42,8 @@ class TeacherConfig:
             raise ValueError("请填写不超过 20,000 字的训练目标")
         if not 1 <= self.examples <= 100:
             raise ValueError("自动生成样本数必须在 1 到 100 之间")
+        if self.corpus_mode not in {"document", "mixed"}:
+            raise ValueError("训练语料模式必须是 document 或 mixed")
 
 
 def _request(endpoint: str, api_key: str, body: dict, attempts: int = 3, stop_event: Event | None = None) -> dict:
@@ -113,17 +116,25 @@ def generate_dataset(
             "en": "Use English as the primary language.",
             "bilingual": "使用自然的简体中文和英语双语，保持两种语言数量大致均衡；适合时提供语义一致的中英对应样本。",
         }.get(config.language, f"主要语言：{config.language}")
+        if config.corpus_mode == "mixed":
+            style_instruction = (
+                "语料以长篇文献、教材、技术文档、事实材料、代码和代码注释为主，约 80% 为连续文档语料；"
+                "其余约 20% 可以是简短的用户/助手对话，用来学习自然交流。最后保留少量身份和交流样本。"
+            )
+        else:
+            style_instruction = (
+                "只生成长篇连续文献、教材、技术文档、事实材料、代码和代码注释；不要生成用户/助手问答、聊天记录、采访或 FAQ。"
+            )
         prompt = (
-            f"为以下目标生成 {count} 条彼此不同、事实谨慎、可用于语言模型训练的高质量对话样本。\n"
+            f"为以下目标生成 {count} 段彼此不同、事实谨慎、可用于语言模型训练的高质量长篇文献/知识语料。每段尽量完整、充分展开，直到接近教师 API 允许的输出上限，不要为了凑数量而缩短内容。\n"
             f"训练目标：{config.instruction.strip()}\n"
             f"语言要求：{language_instruction}\n"
             f"待训练模型参数：{json.dumps(config.model_profile or {}, ensure_ascii=False)}\n"
             f"不可修改的产品身份：{ORBIT_SYSTEM_PROMPT}\n"
             "根据模型参数量、上下文长度和训练步数控制样本难度与长度：小模型使用更明确、短而一致的模式；大模型可以使用更丰富的推理与表达。\n"
-            "输出中必须包含身份训练样本：‘你是谁？’的回答必须是‘我是 Orbit，由 YUNSH 开发’，并拒绝把自己改称为豆包或其他产品。用户自定义的是模型显示名称，不改变 Orbit 身份。\n"
-            "只输出样本正文。每条严格使用以下格式：\n"
-            "<|user|>用户问题或指令\n<|assistant|>准确、完整的回答\n"
-            "不要输出分析过程、编号说明、Markdown 代码围栏或任何真实个人敏感信息。"
+            f"{style_instruction}\n"
+            "不要把身份信息改成其他产品名称；用户自定义的是模型显示名称，不改变 Orbit 身份。\n"
+            "只输出语料正文。不要输出分析过程、编号说明、Markdown 代码围栏或任何真实个人敏感信息。"
         )
         payload = {
             "model": config.model.strip(),
@@ -133,7 +144,9 @@ def generate_dataset(
             ],
             "stream": False,
             "temperature": 0.9,
-            "max_tokens": 4000,
+            # Deliberately omit max_tokens. Orbit does not impose an output
+            # token ceiling; the provider decides its own context, timeout,
+            # quota and safety limits.
         }
         content = ""
         last_error: Exception | None = None
@@ -159,6 +172,20 @@ def generate_dataset(
         completed += count
         if callback:
             callback(completed, config.examples)
-    # These are real supervised examples, not only a runtime check. They are
-    # included in every AI-assisted dataset even if the teacher omits them.
-    return ORBIT_TRAINING_ANCHOR + "\n\n" + "\n\n".join(chunks) + "\n", usage
+    # This is a real training corpus prefix, not a runtime answer shortcut. It
+    # is included in every AI-assisted dataset even if the teacher omits it.
+    corpus = ORBIT_TRAINING_ANCHOR + "\n\n" + "\n\n".join(chunks) + "\n"
+    # The communication tail is training data, not a runtime shortcut. It is
+    # intentionally small for both first training and secondary training, so
+    # the corpus remains document-first while the model learns basic dialogue
+    # behavior and its identity.
+    corpus += (
+        "\nCOMMUNICATION EXAMPLES\n"
+        "<|user|>你好\n"
+        "<|assistant|>你好，我会根据本地训练语料和当前上下文帮助你。\n"
+        "<|user|>你是谁？\n"
+        "<|assistant|>我是 Orbit，由 YUNSH 开发的本地 AI。\n"
+        "<|user|>请解释你掌握的内容。\n"
+        "<|assistant|>我会先依据训练得到的文献、技术资料和代码模式组织回答；不确定时会明确说明。\n"
+    )
+    return corpus, usage
