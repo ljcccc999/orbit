@@ -42,8 +42,8 @@ class TeacherConfig:
             raise ValueError("请填写有效的教师模型名称")
         if not self.instruction.strip() or len(self.instruction) > 20_000:
             raise ValueError("请填写不超过 20,000 字的训练目标")
-        if not 1 <= self.examples <= 5_000:
-            raise ValueError("自动生成样本数必须在 1 到 5,000 之间")
+        if not 1 <= self.examples <= 50_000:
+            raise ValueError("自动生成样本数必须在 1 到 50,000 之间")
         if self.corpus_mode not in {"document", "mixed", "pretraining", "fine_tuning"}:
             raise ValueError("训练语料模式必须是 document、pretraining 或 fine_tuning")
         if not 1 <= int(self.training_round) <= 1000:
@@ -123,32 +123,20 @@ def generate_dataset(
             "bilingual": "必须同时使用简体中文和 English；每一段都要包含中文和英文内容，尽量提供语义对应的双语段落，禁止整段只写英文或只写中文。",
         }.get(config.language, f"主要语言：{config.language}")
         if config.corpus_mode == "fine_tuning":
-            document_count = round(count * 0.25)
-            task_count = round(count * 0.25)
-            dialogue_count = count - document_count - task_count
             composition = (
-                f"这批 {count} 段样本尽量包含约 {document_count} 段专业文献/技术资料、约 {task_count} 段单轮结构化任务、约 {dialogue_count} 段对话（总体目标约 25%/25%/50%）。"
-                if count >= 4
-                else f"本次只有 {count} 段样本，不能在单批次强行凑出三类比例；请按 25%/25%/50% 的总体目标优先保证类型多样，后续批次补足比例。"
+                f"这是第 {config.training_round} 次微调数据生成，本批 {count} 段不要机械套用固定百分比。请在基础知识、专业文献、结构化任务、代码/数学、对话表达和 Orbit 身份之间保持多样性；优先补足当前训练记录中数量不足或验证集效果较差的类别。"
             )
             style_instruction = (
                 composition
-                + "单轮结构化任务不是聊天气泡，不要添加 user/assistant 对话格式；必须覆盖分类/情感分析、实体抽取（NER）、代码或 SQL 生成、摘要总结、文本扩写/润色等类型，使用清晰的输入→输出格式。"
-                + "对话部分才使用 user/assistant 格式，并保留少量 Orbit 身份和交流样本。"
+                + "单轮结构化任务不是聊天气泡，不要添加 user/assistant 对话格式；覆盖分类/情感分析、实体抽取（NER）、代码或 SQL 生成、摘要总结、文本扩写/润色等类型。对话部分才使用 user/assistant 格式，并保留少量 Orbit 身份和交流样本。不要因为追求样本数量而降低质量。"
             )
         elif config.corpus_mode in {"pretraining", "mixed"}:
-            document_count = round(count * 0.8)
-            task_count = round(count * 0.1)
-            dialogue_count = count - document_count - task_count
             composition = (
-                f"这是预训练第 1～N 次的文献优先语料：本批 {count} 段尽量包含约 {document_count} 段长篇文献/教材/技术资料/代码、约 {task_count} 段单轮任务、约 {dialogue_count} 段对话（总体目标约 80%/10%/10%）；"
-                if count >= 5
-                else f"这是预训练第 1～N 次的文献优先语料；本次只有 {count} 段样本，不能在单批次强行凑出比例，请优先生成长篇文献/技术资料，后续批次补足任务和对话尾部。"
+                f"这是预训练第 1～N 次的基础能力语料：本批 {count} 段以基础认知、通用知识、教材/科学/数学/逻辑为主体，同时加入适量代码技术资料和结构化任务，最后只保留少量对话与身份样本；不要把预训练做成聊天数据集。"
             )
             style_instruction = (
                 composition
-                + "约 10% 是分类/情感分析、实体抽取（NER）、代码或 SQL 生成、摘要总结、文本扩写/润色等单轮输入→输出任务；"
-                + "约 10% 才是简短对话和身份样本。继续预训练必须保持文献主体，不要把整个数据集做成聊天气泡。"
+                + "结构化任务覆盖分类/情感分析、实体抽取（NER）、代码或 SQL 生成、摘要总结、文本扩写/润色等单轮输入→输出任务；对话和身份样本只占小部分。"
             )
         else:
             style_instruction = (

@@ -367,7 +367,7 @@ class OrbitRuntime:
         device = str(payload.get("device", "auto")).lower()
         if device not in {"auto", "mps", "cuda", "cpu"}:
             raise ValueError("不支持的训练设备")
-        examples = max(1, min(5_000, int(payload.get("examples", 20))))
+        examples = max(1, min(50_000, int(payload.get("examples", 20))))
         text_chars = max(0, min(100_000_000, int(payload.get("text_chars", 0))))
         model = OrbitConfig.for_preset(preset)
         base = TrainingConfig.for_model(preset)
@@ -391,9 +391,9 @@ class OrbitRuntime:
         if local_mps:
             seq_len = min(seq_len, 512)
         data_units = examples if bool(payload.get("assisted")) else max(1, text_chars // max(256, seq_len))
-        scale_examples = {"300m": 500, "1b": 1_000, "3b": 1_500, "7b": 2_500, "14b": 3_500, "38b": 5_000}[preset]
+        scale_examples = {"300m": 2_000, "1b": 5_000, "3b": 10_000, "7b": 20_000, "14b": 30_000, "38b": 50_000}[preset]
         goal_chars = max(0, min(20_000, int(payload.get("goal_chars", 0))))
-        recommended_examples = min(5_000, scale_examples + min(500, goal_chars // 250))
+        recommended_examples = min(50_000, scale_examples + min(10_000, goal_chars // 100))
         steps = max(100, min(2000, data_units * (20 if bool(payload.get("assisted")) else 8)))
         optimization_goal = str(payload.get("optimization_goal", "balanced")).strip().lower() or "balanced"
         if optimization_goal not in {"fast", "memory", "quality", "balanced"}:
@@ -401,15 +401,15 @@ class OrbitRuntime:
         if optimization_goal == "fast":
             seq_len = min(seq_len, 384)
             steps = max(50, min(2000, round(steps * 0.65)))
-            recommended_examples = min(5_000, max(50, round(recommended_examples * 0.7)))
+            recommended_examples = min(50_000, max(50, round(recommended_examples * 0.7)))
         elif optimization_goal == "memory":
             seq_len = min(seq_len, 256)
             steps = max(50, min(2000, round(steps * 0.8)))
-            recommended_examples = min(5_000, max(50, round(recommended_examples * 0.8)))
+            recommended_examples = min(50_000, max(50, round(recommended_examples * 0.8)))
         elif optimization_goal == "quality":
             seq_len = max(seq_len, min(base.seq_len, 1024))
             steps = max(100, min(2000, round(steps * 1.5)))
-            recommended_examples = min(5_000, max(recommended_examples, round(recommended_examples * 1.25)))
+            recommended_examples = min(50_000, max(recommended_examples, round(recommended_examples * 1.25)))
         warmup = max(10, min(200, steps // 10))
         checkpoint_every = max(25, min(250, steps // 5))
         config = base.with_overrides(
@@ -463,7 +463,7 @@ class OrbitRuntime:
         requested_batch = max(1, int(payload.get("batch_size", 0) or config.batch_size))
         requested_accum = max(1, int(payload.get("grad_accum", 0) or config.grad_accum))
         requested_seq = max(8, int(payload.get("seq_len", 0) or config.seq_len))
-        requested_examples = max(1, min(5_000, int(payload.get("examples", 20))))
+        requested_examples = max(1, min(50_000, int(payload.get("examples", 20))))
         text_bytes = max(0, min(500_000_000, int(payload.get("text_bytes", 0) or 0)))
         estimated_sequences = text_bytes // max(1, requested_seq + 1) if text_bytes else 0
         effective_batch = requested_batch * requested_accum
@@ -513,13 +513,13 @@ class OrbitRuntime:
             if requested_examples < 100 and requested_steps >= max(200, requested_examples * 4):
                 advice.append({
                     "severity": "warning", "code": "finetune_overfit",
-                    "zh": f"当前是微调：{requested_examples} 个样本配 {requested_steps} 步，过拟合风险较高。建议先准备至少 500–1000 条高质量样本，或把步数降到约 60–120 步，再根据验证集增加。",
-                    "en": f"This is fine-tuning: {requested_examples} samples with {requested_steps} steps has a high overfitting risk. Start with 500–1,000 high-quality samples or about 60–120 steps, then increase only if validation improves.",
+                    "zh": f"当前是微调：{requested_examples} 个样本配 {requested_steps} 步，可能过拟合。样本可以增加，但必须先去重、质检并保留验证集；只有验证集继续改善时才增加步数。",
+                    "en": f"This is fine-tuning: {requested_examples} samples with {requested_steps} steps may overfit. More data is useful only after deduplication and quality checks; increase steps only while held-out validation improves.",
                 })
             advice.append({
                 "severity": "info", "code": "finetune_data",
-                "zh": "微调使用专业文献和约 50% 对话样本：文献提供领域知识，对话提供指令遵循、表达和交互格式。",
-                "en": "Fine-tuning uses specialized documents and about 50% dialogue: documents provide domain knowledge, while dialogue teaches instruction following and interaction format.",
+                "zh": "微调不采用固定百分比：先保留基础知识，再根据领域、结构化任务、代码/数学、对话和身份的验证集表现动态补样；优先增加高质量、去重后且能改善验证集的类别。",
+                "en": "Fine-tuning uses no fixed percentages: preserve general knowledge, then adapt domain, structured-task, code/math, dialogue and identity data according to held-out validation; prioritize high-quality, deduplicated data that improves validation.",
             })
         else:
             mode_title = (
@@ -1022,23 +1022,39 @@ class OrbitRuntime:
     def _corpus_policy(training_mode: str) -> dict[str, Any]:
         if training_mode == "fine_tuning":
             return {
-                "name": "specialized_documents_plus_dialogue",
-                "document_ratio": 0.25,
-                "structured_task_ratio": 0.25,
-                "dialogue_ratio": 0.5,
+                "name": "adaptive_quality_diverse_instruction_mix",
+                "document_ratio": None,
+                "structured_task_ratio": None,
+                "dialogue_ratio": None,
+                "initial_target_ranges": {
+                    "general_knowledge": "15–25%",
+                    "domain_documents": "20–35%",
+                    "structured_tasks": "20–30%",
+                    "code_math": "10–20%",
+                    "dialogue_style": "5–15%",
+                    "identity_safety": "2–5%",
+                },
                 "task_types": ["分类/情感分析", "实体抽取（NER）", "代码/SQL 生成", "摘要总结", "文本扩写/润色"],
-                "description": "专业文献约 25%，分类/NER/代码/SQL/摘要/扩写等单轮任务约 25%，对话约 50%",
+                "description": "研究驱动的动态混合：保留基础知识，再根据领域、结构化任务、代码/数学、对话和身份的验证集表现自动补样，不固定为某个百分比",
                 "manual_recommendation": "人工：专业文献、产品/领域知识、术语、代码规范、标注规则和希望模型遵守的回答格式；人工内容应以你真实希望它掌握的专属知识为主。",
                 "ai_recommendation": "AI 辅助：生成基础认知、通用编程模式、结构化任务和少量基础对话，帮助模型学会输入→输出和指令遵循。",
-                "mixed_strategy": "同时训练时，AI 负责基础能力，人工内容负责 Orbit 的专属知识；两部分合并，不互相替换。",
+                "mixed_strategy": "同时训练时，AI 和人工数据先去重、质检并合并；每轮根据验证集表现自动调整类别，低质量或重复类别不会因数量多而获得更高权重。",
             }
         return {
-            "name": "document_first_with_small_dialogue_tail",
-            "document_ratio": 0.8,
+            "name": "foundation_knowledge_first",
+            "document_ratio": 0.65,
             "structured_task_ratio": 0.1,
-            "dialogue_ratio": 0.1,
+            "dialogue_ratio": 0.05,
+            "initial_target_ranges": {
+                "general_knowledge": "40–50%",
+                "textbooks_science_reasoning": "15–25%",
+                "math_logic": "8–12%",
+                "code_technical": "8–12%",
+                "structured_tasks": "8–12%",
+                "dialogue_identity": "3–7%",
+            },
             "task_types": ["分类/情感分析", "实体抽取（NER）", "代码/SQL 生成", "摘要总结", "文本扩写/润色"],
-            "description": "多篇文献、教材、技术资料与代码约 80%，单轮结构化任务约 10%，少量对话和身份样本约 10%",
+            "description": "基础认知和通用知识优先，配合教材/科学/数学/逻辑、代码技术资料、结构化任务以及少量对话身份；这是初始范围，训练后按验证集调整",
             "manual_recommendation": "人工：多篇清洗后的文献、教材、技术资料、代码、代码注释、事实材料，以及你希望 Orbit 记住的产品/项目专属知识；不要只写几句问答。",
             "ai_recommendation": "AI 辅助：生成基础认知、通用世界知识表达、基础编程模式、分类/NER/代码/SQL/摘要/扩写任务，再追加少量基础对话和身份样本。",
             "mixed_strategy": "同时训练时，AI 先补足基础认知和通用能力，人工语料专门承载用户要求 Orbit 学会的内容；两部分合并训练。",

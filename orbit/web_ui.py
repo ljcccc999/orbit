@@ -367,8 +367,8 @@ PAGE = PAGE.replace(
     "预训练人工内容：多篇清洗后的文献、教材、技术资料、代码、代码注释，以及你希望 Orbit 记住的专属项目知识；不要只写几句问答。微调人工内容：专业文献、术语、产品资料、代码规范、标注规则和约 50% 高质量指令对话。人工内容负责你自己的 Orbit 知识；AI 辅助负责基础认知和通用能力，两者可同时训练。",
 )
 PAGE = PAGE.replace(
-    "Pretraining: add many clean documents, books, technical references and code, then a small amount of structured tasks/dialogue. Fine-tuning: add domain documents, labeled single-turn tasks and about 50% high-quality instruction dialogue.",
-    "Pretraining manual content: cleaned documents, books, technical references, code, comments and the project-specific knowledge you want Orbit to remember. Fine-tuning manual content: specialized documents, terminology, product material, coding conventions, labeling rules and about 50% high-quality instruction dialogue. Manual content teaches your private Orbit knowledge; AI assistance supplies foundational ability, and both can train together.",
+    "Pretraining: prioritize foundational knowledge, textbooks/science/math, then add technical/code material, structured tasks and a small dialogue/identity tail. Fine-tuning: use an adaptive, quality- and validation-driven mix of general knowledge, domain documents, structured tasks, code/math, dialogue and identity; do not force fixed percentages.",
+    "Pretraining manual content: cleaned documents, books, technical references, code, comments and the project-specific knowledge you want Orbit to remember. Fine-tuning manual content: specialized documents, terminology, product material, coding conventions and labeling rules; the mix is adjusted by validation results, not a fixed dialogue percentage. Manual content teaches your private Orbit knowledge; AI assistance supplies foundational ability, and both can train together.",
 )
 
 # Include the linked manual-text recommendation in each optimization choice.
@@ -380,12 +380,14 @@ PAGE = PAGE.replace(
 # Keep the teacher sample control aligned with the backend's larger corpus
 # limit.  Hundreds to thousands of samples are useful for pretraining; the
 # actual recommendation remains model-size and objective dependent.
-PAGE = PAGE.replace('id="teacherExamples" type="number" value="20" min="1" max="100"', 'id="teacherExamples" type="number" value="20" min="1" max="5000"')
-PAGE = PAGE.replace('20 is a balanced start.', 'Orbit recommends hundreds to thousands for pretraining and caps this field at 5,000.')
+PAGE = PAGE.replace('id="teacherExamples" type="number" value="20" min="1" max="100"', 'id="teacherExamples" type="number" value="20" min="1" max="50000"')
+PAGE = PAGE.replace('20 is a balanced start.', 'Orbit generates as many high-quality, deduplicated samples as resources allow and caps this field at 50,000.')
+PAGE = PAGE.replace('max="5000"', 'max="50000"')
+PAGE = PAGE.replace('caps this field at 5,000.', 'caps this field at 50,000.')
 PAGE = PAGE.replace('20 个适合作为起点。', '预训练建议使用数百到数千个，当前上限为 5,000 个。')
 PAGE = PAGE.replace(
     "function renderSampleEstimate(r){",
-    "function syncCorpusPlan(){const plan=$('corpusPlan');if(!plan||plan.dataset.edited==='1')return;plan.value=$('trainingMode')?.value==='fine_tuning'?'专业文献/技术资料约25%；分类、情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮输入→输出任务约25%；高质量用户/助手对话约50%；最后加入少量 Orbit 身份样本。':'多篇文献、教材、技术文档、事实材料、代码和代码注释约80%；分类/情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮任务约10%；少量用户/助手对话和 Orbit 身份样本约10%。预训练第 1～N 次都保持文献为主。'}function renderSampleEstimate(r){",
+    "function syncCorpusPlan(){const plan=$('corpusPlan');if(!plan||plan.dataset.edited==='1')return;plan.value=$('trainingMode')?.value==='fine_tuning'?'研究驱动的动态混合：保留基础知识，按专业文献、结构化任务、代码/数学、对话和身份的验证集表现自动补样，不固定百分比；样本先去重和质检。':'基础认知与通用知识为主体，加入教材/科学/数学/逻辑、代码技术资料、结构化任务以及少量高质量多轮对话和 Orbit 身份样本；训练后按验证集调整。'}function renderSampleEstimate(r){",
 )
 PAGE = PAGE.replace(
     "syncBaseModelSource(); </script>",
@@ -393,7 +395,7 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     "function renderSampleEstimate(r){",
-    "function syncCorpusPlan(){const plan=$('corpusPlan');if(!plan||plan.dataset.edited==='1')return;plan.value=$('trainingMode')?.value==='fine_tuning'?'专业文献/技术资料约25%；分类、情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮输入→输出任务约25%；高质量用户/助手对话约50%；最后加入少量 Orbit 身份样本。':'多篇文献、教材、技术文档、事实材料、代码和代码注释约80%；分类/情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮任务约10%；少量用户/助手对话和 Orbit 身份样本约10%。预训练第 1～N 次都保持文献为主。'}function renderSampleEstimate(r){",
+    "function syncCorpusPlan(){const plan=$('corpusPlan');if(!plan||plan.dataset.edited==='1')return;plan.value=$('trainingMode')?.value==='fine_tuning'?'研究驱动的动态混合：保留基础知识，按专业文献、结构化任务、代码/数学、对话和身份的验证集表现自动补样，不固定百分比；样本先去重和质检。':'基础认知与通用知识为主体，加入教材/科学/数学/逻辑、代码技术资料、结构化任务以及少量高质量多轮对话和 Orbit 身份样本；训练后按验证集调整。'}function renderSampleEstimate(r){",
 )
 PAGE = PAGE.replace(
     "syncBaseModelSource(); </script>",
