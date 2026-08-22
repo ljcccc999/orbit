@@ -25,6 +25,8 @@ def main() -> None:
         examples=int(config.get("examples", 20)),
         language=str(config.get("language", "bilingual")),
         corpus_mode=str(config.get("corpus_mode", "document")),
+        training_round=int(config.get("training_round", 1) or 1),
+        corpus_plan=str(config.get("corpus_plan", "")),
         model_profile=config.get("model_profile") or {},
     )
 

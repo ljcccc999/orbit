@@ -398,6 +398,10 @@ class Handler(BaseHTTPRequestHandler):
             model_name=str(data.get("model_name", "orbit")),
             data_language=str(data.get("data_language", "bilingual")),
             assistant=data.get("assistant") if isinstance(data.get("assistant"), dict) else None,
+            training_mode=str(data.get("training_mode", "pretraining")),
+            training_round=int(data.get("training_round", 1) or 1),
+            base_model=str(data.get("base_model", "")),
+            optimization_goal=str(data.get("optimization_goal", "balanced")),
         )
         job_id = zip_path.stem.removeprefix("orbit-training-")
         self._json(201, {

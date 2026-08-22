@@ -74,6 +74,17 @@ PAGE = PAGE.replace(
 function renderKeys(rows){""",
 )
 PAGE = PAGE.replace("$('teacherInstruction').oninput=scheduleRecommendation;", "$('teacherInstruction').oninput=scheduleRecommendation;['steps','batch','seq','accum','lr','warmup','decay','clip','precision','save'].forEach(id=>$(id).addEventListener('input',()=>{manualConfigEdit=true;renderLiveConfigImpact()}));")
+PAGE = PAGE.replace(
+    "examples:+$('teacherExamples').value||20,language:$('teacherLanguage').value,model_profile:",
+    "examples:+$('teacherExamples').value||20,language:$('teacherLanguage').value,corpus_mode:$('trainingMode').value==='fine_tuning'?'fine_tuning':'pretraining',training_round:+$('trainingRound').value||1,model_profile:",
+)
+PAGE = PAGE.replace(
+    "instruction:$('teacherInstruction').value,examples:+$('teacherExamples').value,language:$('teacherLanguage').value,acknowledge_cost:",
+    "instruction:$('teacherInstruction').value,corpus_plan:$('corpusPlan').value,examples:+$('teacherExamples').value,language:$('teacherLanguage').value,acknowledge_cost:",
+).replace(
+    "instruction,examples:+$('teacherExamples').value||20,language:$('teacherLanguage').value,model_profile:",
+    "instruction,corpus_plan:$('corpusPlan').value,examples:+$('teacherExamples').value||20,language:$('teacherLanguage').value,model_profile:",
+)
 PAGE = PAGE.replace("$('preset').onchange=scheduleRecommendation;$('device').onchange=scheduleRecommendation;", "$('preset').onchange=()=>{manualConfigEdit=false;scheduleRecommendation()};$('device').onchange=()=>{manualConfigEdit=false;scheduleRecommendation()};")
 PAGE = PAGE.replace("if(!currentConversation)await newConversation();", "if(!currentConversation){await newConversation();if(!currentConversation)return;}")
 PAGE = PAGE.replace("</style>", ".history-entry{display:flex;align-items:stretch;gap:4px;position:relative}.history-entry .run-item{flex:1;min-width:0}.history-delete{opacity:0;pointer-events:none;align-self:center;min-width:24px;width:24px;height:24px;padding:0;font-size:13px;line-height:22px;border-radius:7px;transition:opacity .15s ease}.history-entry:hover .history-delete,.history-delete:focus-visible{opacity:1;pointer-events:auto}.thinking-bubble details{width:min(100%,620px)}.thinking-bubble summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700}.thinking-lines{display:grid;gap:4px;margin-top:8px;color:var(--muted);font-size:11px}.thinking-lines div{padding-left:2px}.thinking-answer{margin-top:10px;white-space:pre-wrap;word-break:break-word;color:var(--ink)}</style>")
@@ -101,7 +112,7 @@ PAGE = PAGE.replace("stopped:'Stopped',failed:'Failed'", "stopped:'Stopped',stop
 PAGE = PAGE.replace("stopped:'已停止'", "stopped:'已停止',stopped_deleted:'已停止并删除模型'")
 PAGE = PAGE.replace("stopped:'Stopped'", "stopped:'Stopped',stopped_deleted:'Stopped and deleted'")
 PAGE = PAGE.replace("manualConfigEdit=false;const t", "manualConfigEdit=false,trainingResetFor='';const t")
-PAGE = PAGE.replace("function startPolling(){", "function resetTrainingForm(){const set=(id,value)=>{const e=$(id);if(e)e.value=value};set('modelName','');set('baseModel','');set('preset','300m');set('dataLanguage','bilingual');set('device','auto');set('teacherExamples','20');set('teacherLanguage','bilingual');set('corpus','');set('teacherInstruction','');set('steps','100');set('batch','1');set('seq','256');set('accum','1');set('lr','0.0003');set('warmup','10');set('decay','0.1');set('clip','1.0');set('precision','auto');set('save','100');const ack=$('teacherAck');if(ack)ack.checked=false;lastRecommendation=null;manualConfigEdit=false;const impact=$('configImpact');if(impact)impact.innerHTML='';const note=$('autoTuneNote');if(note)note.textContent=t('autoTunePending');const reason=$('trainingBlockReason');if(reason)reason.textContent='';const start=$('startTraining'),row=system?.presets?.find(x=>x.id==='300m');if(start)start.disabled=Boolean(row&&!row.can_train_here);updateEstimate()}function setTrainingActionState(s){const live=['preparing','generating','running','stopping'].includes(s?.status),stopped=['stopped','failed'].includes(s?.status)&&Boolean(s?.model_id),terminal=['completed','stopped','stopped_deleted','failed'].includes(s?.status);if(terminal){const key=s?.run_id||`${s.status}:${s.model_id||''}`;if(trainingResetFor!==key){trainingResetFor=key;resetTrainingForm()}}const safe=$('stopTraining'),remove=$('stopDeleteTraining');if(safe)safe.disabled=!live;if(remove){remove.disabled=!live&&!stopped;remove.textContent=stopped?(currentLang==='zh'?'删除已停止模型':'Delete stopped model'):t('stopDelete')}}const _orbitUpdateTraining=updateTraining;updateTraining=function(s){_orbitUpdateTraining(s);setTrainingActionState(s)};function startPolling(){")
+PAGE = PAGE.replace("function startPolling(){", "function resetTrainingForm(){const set=(id,value)=>{const e=$(id);if(e)e.value=value};set('modelName','');set('trainingMode','pretraining');set('trainingRound','1');set('optimizationGoal','balanced');set('baseModel','');set('preset','300m');set('dataLanguage','bilingual');set('device','auto');set('teacherExamples','20');set('teacherLanguage','bilingual');set('corpus','');set('teacherInstruction','');set('steps','100');set('batch','1');set('seq','256');set('accum','1');set('lr','0.0003');set('warmup','10');set('decay','0.1');set('clip','1.0');set('precision','auto');set('save','100');const ack=$('teacherAck');if(ack)ack.checked=false;lastRecommendation=null;manualConfigEdit=false;const impact=$('configImpact');if(impact)impact.innerHTML='';const note=$('autoTuneNote');if(note)note.textContent=t('autoTunePending');const reason=$('trainingBlockReason');if(reason)reason.textContent='';const start=$('startTraining'),row=system?.presets?.find(x=>x.id==='300m');if(start)start.disabled=Boolean(row&&!row.can_train_here);syncTrainingMode(false);updateEstimate()}function setTrainingActionState(s){const live=['preparing','generating','running','stopping'].includes(s?.status),stopped=['stopped','failed'].includes(s?.status)&&Boolean(s?.model_id),terminal=['completed','stopped','stopped_deleted','failed'].includes(s?.status);if(terminal){const key=s?.run_id||`${s.status}:${s.model_id||''}`;if(trainingResetFor!==key){trainingResetFor=key;resetTrainingForm()}}const safe=$('stopTraining'),remove=$('stopDeleteTraining');if(safe)safe.disabled=!live;if(remove){remove.disabled=!live&&!stopped;remove.textContent=stopped?(currentLang==='zh'?'删除已停止模型':'Delete stopped model'):t('stopDelete')}}const _orbitUpdateTraining=updateTraining;updateTraining=function(s){_orbitUpdateTraining(s);setTrainingActionState(s)};function startPolling(){")
 PAGE = PAGE.replace("set('modelName','');set('baseModel','');set('preset'", "set('modelName','');set('trainingMode','pretraining');set('baseModel','');set('preset'")
 PAGE = PAGE.replace(
     '<button class="button danger" id="stopDeleteTraining" data-i18n="stopDelete">Stop and delete</button><span id="trainingBlockReason"',
@@ -328,6 +339,22 @@ PAGE = PAGE.replace(
     1,
 )
 PAGE = PAGE.replace(
+    "function renderSampleEstimate(r){",
+    "function syncCorpusPlan(){const plan=$('corpusPlan');if(!plan||plan.dataset.edited==='1')return;plan.value=$('trainingMode')?.value==='fine_tuning'?'专业文献/技术资料约25%；分类、情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮输入→输出任务约25%；高质量用户/助手对话约50%；最后加入少量 Orbit 身份样本。':'多篇文献、教材、技术文档、事实材料、代码和代码注释约80%；分类/情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮任务约10%；少量用户/助手对话和 Orbit 身份样本约10%。预训练第 1～N 次都保持文献为主。'}function renderSampleEstimate(r){",
+)
+PAGE = PAGE.replace(
+    "syncBaseModelSource(); </script>",
+    "syncBaseModelSource();syncCorpusPlan();$('trainingMode')?.addEventListener('change',syncCorpusPlan);$('corpusPlan')?.addEventListener('input',()=>{ $('corpusPlan').dataset.edited='1'}); </script>",
+)
+PAGE = PAGE.replace(
+    "function renderSampleEstimate(r){",
+    "function syncCorpusPlan(){const plan=$('corpusPlan');if(!plan||plan.dataset.edited==='1')return;plan.value=$('trainingMode')?.value==='fine_tuning'?'专业文献/技术资料约25%；分类、情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮输入→输出任务约25%；高质量用户/助手对话约50%；最后加入少量 Orbit 身份样本。':'多篇文献、教材、技术文档、事实材料、代码和代码注释约80%；分类/情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮任务约10%；少量用户/助手对话和 Orbit 身份样本约10%。预训练第 1～N 次都保持文献为主。'}function renderSampleEstimate(r){",
+)
+PAGE = PAGE.replace(
+    "syncBaseModelSource(); </script>",
+    "syncBaseModelSource();syncCorpusPlan();$('trainingMode')?.addEventListener('change',syncCorpusPlan);$('corpusPlan')?.addEventListener('input',()=>{ $('corpusPlan').dataset.edited='1'}); </script>",
+)
+PAGE = PAGE.replace(
     "</script></body></html>",
     """function setupOrbitSidebar(){const side=document.querySelector('.sidebar'),nav=side?.querySelector('.nav'),history=document.getElementById('conversationList'),target=document.getElementById('sidebarConversationList');if(!side||!nav||!history||!target)return;target.appendChild(history);const heading=document.querySelector('#chat .inspector [data-i18n=conversationHistory]');const divider=heading?.nextElementSibling;heading?.remove();divider?.remove();const chat=nav.querySelector('[data-page=chat] span:last-child');if(chat){chat.dataset.i18n='newChat';chat.textContent=currentLang==='zh'?'新对话':'New chat'}const plugins=document.createElement('button');plugins.dataset.sideAction='plugins';plugins.innerHTML='<span class=\"icon\">✦</span><span data-i18n=\"navPlugins\">Plugins</span>';const train=nav.querySelector('[data-page=train]');if(train)nav.insertBefore(plugins,train);const actions=side.querySelectorAll('[data-side-action]');actions.forEach(button=>{button.onclick=()=>{const action=button.dataset.sideAction;if(action==='new')newConversation();else if(action==='search')document.getElementById('prompt')?.focus();else if(action==='plugins')toast(currentLang==='zh'?'插件入口已保留，当前可直接使用训练和 API。':'The Plugins entry is reserved; Training and API are available now.')}});const languageSelect=document.getElementById('language');if(languageSelect)languageSelect.onchange=()=>{const value=languageSelect.value;localStorage.setItem('orbit-language',value);localStorage.setItem('orbit-language-manual',value==='system'?'0':'1');applyLanguage()};applyLanguage()}setupOrbitSidebar();</script></body></html>""",
 )
@@ -419,32 +446,48 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     '<textarea id="corpus" data-i18n-placeholder="trainingPlaceholder"></textarea>',
-    '<textarea id="corpus" data-i18n-placeholder="trainingPlaceholder"></textarea><label class="button ghost" for="corpusFile" style="width:max-content" data-i18n="importCorpus">导入本地文献/代码</label><input id="corpusFile" type="file" accept=".txt,.md,.markdown,.json,.jsonl,.csv" hidden><span class="help" data-i18n="importCorpusHelp">仅读取你选择的本地文本文件；不会联网抓取文献或读取聊天记录。</span><span id="manualSampleEstimate" class="help"></span>',
+    '<textarea id="corpus" data-i18n-placeholder="trainingPlaceholder"></textarea><label class="button ghost" for="corpusFile" style="width:max-content" data-i18n="importCorpus">导入本地文献/代码</label><input id="corpusFile" type="file" accept=".txt,.md,.markdown,.json,.jsonl,.csv" hidden><span class="help" data-i18n="importCorpusHelp">仅读取你选择的本地文本文件；不会联网抓取文献或读取聊天记录。</span><span class="help" data-i18n="manualContentAdvice">预训练：加入大量清洗后的文献、书籍、技术资料、代码，再加入少量结构化任务/对话。微调：加入专业文献、带明确输入输出的单轮任务，以及约 50% 高质量指令对话。</span><span id="manualSampleEstimate" class="help"></span>',
 )
 PAGE = PAGE.replace(
     "navSettings:'Settings'",
-    "navSettings:'Settings',baseModelSource:'Base model source',localModel:'Local model',downloadModel:'Download compatible model',baseModelSourceHelp:'Fine-tune an existing Orbit checkpoint or download a compatible Orbit checkpoint first.',downloadUrl:'Model HTTPS URL',downloadName:'Downloaded model name',downloadHelp:'Only Orbit checkpoints are accepted; external Qwen weights need an adapter and cannot be fine-tuned here yet.',downloadStart:'Download and verify model',importCorpus:'Import local corpus',importCorpusHelp:'Reads only a local text file you select; it does not fetch literature or read conversations.'",
+    "navSettings:'Settings',baseModelSource:'Base model source',localModel:'Local model',downloadModel:'Download compatible model',baseModelSourceHelp:'Fine-tune an existing Orbit checkpoint or download a compatible Orbit checkpoint first.',downloadUrl:'Model HTTPS URL',downloadName:'Downloaded model name',downloadHelp:'Only Orbit checkpoints are accepted; external Qwen weights need an adapter and cannot be fine-tuned here yet.',downloadStart:'Download and verify model',importCorpus:'Import local corpus',importCorpusHelp:'Reads only a local text file you select; it does not fetch literature or read conversations.',manualContentAdvice:'Pretraining: add many clean documents, books, technical references and code, then a small amount of structured tasks/dialogue. Fine-tuning: add domain documents, labeled single-turn tasks and about 50% high-quality instruction dialogue.'",
 ).replace(
     "navSettings:'设置'",
-    "navSettings:'设置',baseModelSource:'基础模型来源',localModel:'本地模型',downloadModel:'下载兼容模型',baseModelSourceHelp:'可以微调已经训练的 Orbit，也可以先下载兼容的 Orbit checkpoint。',downloadUrl:'模型 HTTPS 下载地址',downloadName:'下载后模型名',downloadHelp:'只接受 Orbit checkpoint；Qwen 等外部权重需要适配器，目前不能直接微调。',downloadStart:'下载并验证模型',importCorpus:'导入本地文献/代码',importCorpusHelp:'只读取你选择的本地文本文件；不会联网抓取文献或读取聊天记录。'",
+    "navSettings:'设置',baseModelSource:'基础模型来源',localModel:'本地模型',downloadModel:'下载兼容模型',baseModelSourceHelp:'可以微调已经训练的 Orbit，也可以先下载兼容的 Orbit checkpoint。',downloadUrl:'模型 HTTPS 下载地址',downloadName:'下载后模型名',downloadHelp:'只接受 Orbit checkpoint；Qwen 等外部权重需要适配器，目前不能直接微调。',downloadStart:'下载并验证模型',importCorpus:'导入本地文献/代码',importCorpusHelp:'只读取你选择的本地文本文件；不会联网抓取文献或读取聊天记录。',manualContentAdvice:'预训练：加入大量清洗后的文献、书籍、技术资料、代码，再加入少量结构化任务/对话。微调：加入专业文献、带明确输入输出的单轮任务，以及约 50% 高质量指令对话。'",
 )
 PAGE = PAGE.replace(
     "baseModel:'Base model',baseModelHelp:",
-    "trainingMode:'Training method',pretraining:'Pretraining (from scratch)',fineTuning:'Fine-tuning (existing model)',trainingModeHelp:'Pretraining starts with random weights; fine-tuning continues an existing local model.',baseModel:'Base model',selectBaseModel:'Select a local model to fine-tune',baseModelHelp:",
+    "trainingMode:'Training method',pretraining:'Pretraining (from scratch)',fineTuning:'Fine-tuning (existing model)',trainingModeHelp:'Pretraining round 1 starts from random weights; rounds 2–N continue the previous Orbit model. Fine-tuning uses specialized documents plus about 50% dialogue.',trainingRound:'Training round',trainingRoundHelp:'Round 1 is first pretraining. Orbit continued pretraining must use the previous round as parent; fine-tuning may also use an existing Orbit model.',optimizationGoal:'Optimization target',fastGoal:'1. Save time',memoryGoal:'2. Save memory',qualityGoal:'3. Quality first (ignore time)',balancedGoal:'Balanced',optimizationGoalHelp:'Orbit recommends steps, sequence length, accumulation, checkpoint frequency and AI sample count together.',baseModel:'Base model',selectBaseModel:'Select a parent/local model',baseModelHelp:",
 ).replace(
     "baseModel:'基础模型',baseModelHelp:",
-    "trainingMode:'训练方式',pretraining:'预训练（从零开始）',fineTuning:'微调（基于已有模型）',trainingModeHelp:'预训练从随机权重开始；微调继续训练已有本地模型。',baseModel:'基础模型',selectBaseModel:'选择要微调的本地模型',baseModelHelp:",
+    "trainingMode:'训练方式',pretraining:'预训练（从零开始）',fineTuning:'微调（基于已有模型）',trainingModeHelp:'预训练第 1 次从随机权重开始；第 2～N 次接着上一次 Orbit 模型训练。微调使用专业文献 + 约 50% 对话。',trainingRound:'训练次数',trainingRoundHelp:'第 1 次是首次预训练；Orbit 继续预训练必须选择上一轮父模型；微调也可以选择已有 Orbit 模型。',optimizationGoal:'参数优化目标',fastGoal:'1. 省时间',memoryGoal:'2. 省内存',qualityGoal:'3. 效果优先（不计时间）',balancedGoal:'平衡',optimizationGoalHelp:'Orbit 会联动推荐步数、序列长度、梯度累计、checkpoint 频率和 AI 样本数。',baseModel:'基础模型',selectBaseModel:'选择父模型/本地模型',baseModelHelp:",
+)
+PAGE = PAGE.replace(
+    '<div class="field"><label data-i18n="trainingMode">Training method</label><select id="trainingMode"><option value="pretraining" data-i18n="pretraining">Pretraining (from scratch)</option><option value="fine_tuning" data-i18n="fineTuning">Fine-tuning (existing model)</option></select><span class="help" data-i18n="trainingModeHelp">Pretraining starts with random weights; fine-tuning continues an existing local model.</span></div>',
+    '<div class="field"><label data-i18n="trainingMode">Training method</label><select id="trainingMode"><option value="pretraining" data-i18n="pretraining">Pretraining (from scratch)</option><option value="fine_tuning" data-i18n="fineTuning">Fine-tuning (existing model)</option></select><span class="help" data-i18n="trainingModeHelp">Pretraining round 1 starts from random weights; rounds 2–N continue the previous Orbit model. Fine-tuning uses specialized documents plus about 50% dialogue.</span></div><div class="field"><label data-i18n="trainingRound">Training round</label><input id="trainingRound" type="number" min="1" max="1000" value="1"><span class="help" data-i18n="trainingRoundHelp">Round 1 is first pretraining; later Orbit rounds use the previous model.</span></div><div class="field"><label data-i18n="optimizationGoal">Optimization target</label><select id="optimizationGoal"><option value="balanced" data-i18n="balancedGoal">Balanced</option><option value="fast" data-i18n="fastGoal">1. Save time</option><option value="memory" data-i18n="memoryGoal">2. Save memory</option><option value="quality" data-i18n="qualityGoal">3. Quality first (ignore time)</option></select><span class="help" data-i18n="optimizationGoalHelp">Orbit recommends advanced parameters and AI sample count together.</span></div>',
+)
+PAGE = PAGE.replace(
+    '<div class="field"><label data-i18n="trainingMode">训练方式</label><select id="trainingMode">',
+    '<div class="field"><label data-i18n="trainingMode">训练方式</label><select id="trainingMode">',
+)
+PAGE = PAGE.replace(
+    '<div class="field" style="margin-top:12px"><label data-i18n="goal">Desired AI behavior</label><textarea id="teacherInstruction" data-i18n-placeholder="goalPlaceholder"></textarea></div>',
+    '<div class="field" style="margin-top:12px"><label data-i18n="goal">Desired AI behavior</label><textarea id="teacherInstruction" data-i18n-placeholder="goalPlaceholder"></textarea></div><div class="field"><label data-i18n="corpusPlan">Corpus plan sent to the teacher</label><textarea id="corpusPlan" data-i18n-placeholder="corpusPlanPlaceholder" style="min-height:96px"></textarea><span class="help" data-i18n="corpusPlanHelp">Orbit combines this plan with your desired behavior and sends both in one teacher prompt.</span></div>',
+)
+PAGE = PAGE.replace(
+    "goal:'Desired AI behavior',goalPlaceholder:'Describe what this AI should become…'",
+    "goal:'Desired AI behavior',goalPlaceholder:'Describe what this AI should become…',corpusPlan:'Corpus plan sent to the teacher',corpusPlanPlaceholder:'Orbit fills a document/task/dialogue plan here…',corpusPlanHelp:'Orbit combines this plan with your desired behavior and sends both in one teacher prompt.'",
+).replace(
+    "goal:'希望 AI 成为什么样',goalPlaceholder:'描述这个 AI 应具备的行为、语气和能力…'",
+    "goal:'希望 AI 成为什么样',goalPlaceholder:'描述这个 AI 应具备的行为、语气和能力…',corpusPlan:'发送给教师 AI 的语料规划',corpusPlanPlaceholder:'Orbit 会在这里填入文献/任务/对话配比规划…',corpusPlanHelp:'Orbit 会把这个规划和你的训练目标合并，一起发送给教师 AI。'",
 )
 PAGE = PAGE.replace(
     "function trainPayload(){return{model_name:$('modelName').value,base_model:",
-    "function trainPayload(){return{model_name:$('modelName').value,training_mode:$('trainingMode').value,base_model:",
+    "function trainPayload(){return{model_name:$('modelName').value,training_mode:$('trainingMode').value,training_round:+$('trainingRound').value||1,optimization_goal:$('optimizationGoal').value,base_model_source:$('baseModelSource')?.value||'local',base_model:",
 )
 PAGE = PAGE.replace(
-    "function continueTraining(encoded){const id=decodeURIComponent(encoded);showPage('train');",
-    "function continueTraining(encoded){const id=decodeURIComponent(encoded);showPage('train');$('trainingMode').value='fine_tuning';syncTrainingMode(false);",
-).replace(
     "showPage('train');$('baseModel').value=m?r.model_id:'';",
-    "showPage('train');$('trainingMode').value='fine_tuning';$('baseModel').value=m?r.model_id:'';syncTrainingMode(false);",
+    "showPage('train');$('trainingMode').value='pretraining';$('baseModel').value=m?r.model_id:'';$('trainingRound').value=Number(m?.training_round||1)+1;syncTrainingMode(false);",
 )
 PAGE = PAGE.replace(
     "const orbitPrompt=$('prompt');let orbitComposing=false;",
@@ -456,7 +499,7 @@ PAGE = PAGE.replace(
  )
 PAGE = PAGE.replace(
     "examples:+$('teacherExamples').value||20,text_chars:$('corpus').value.length,goal_chars:$('teacherInstruction').value.length,assisted:",
-    "examples:+$('teacherExamples').value||20,text_chars:$('corpus').value.length,text_bytes:new TextEncoder().encode($('corpus').value).length,training_mode:$('trainingMode').value,base_model:$('baseModel').value,steps:+$('steps').value||0,batch_size:+$('batch').value||0,grad_accum:+$('accum').value||0,seq_len:+$('seq').value||0,goal_chars:$('teacherInstruction').value.length,assisted:",
+    "examples:+$('teacherExamples').value||20,text_chars:$('corpus').value.length,text_bytes:new TextEncoder().encode($('corpus').value).length,training_mode:$('trainingMode').value,training_round:+$('trainingRound').value||1,optimization_goal:$('optimizationGoal').value,base_model_source:$('baseModelSource')?.value||'local',base_model:$('baseModel').value,steps:+$('steps').value||0,batch_size:+$('batch').value||0,grad_accum:+$('accum').value||0,seq_len:+$('seq').value||0,goal_chars:$('teacherInstruction').value.length,assisted:",
 )
 PAGE = PAGE.replace(
     "lastRecommendation=r;const c=r.config;",
@@ -464,7 +507,7 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     "async function recommendTraining(){",
-    "function syncTrainingMode(trigger=true){const mode=$('trainingMode'),base=$('baseModel');if(!mode||!base)return;if(mode.value==='pretraining'){base.value='';base.disabled=true}else{base.disabled=false;if(!base.value&&system?.models?.length){base.value=system.models[0].id}if(!base.value&&base.options.length>1){base.value=base.options[1].value}if(!base.value&&base.options.length===1){base.options[0].textContent=t('selectBaseModel')}}if(trigger)scheduleRecommendation()}async function recommendTraining(){",
+    "function syncTrainingMode(trigger=true){const mode=$('trainingMode'),base=$('baseModel'),round=$('trainingRound');if(!mode||!base)return;const n=Math.max(1,Number(round?.value||1));if(mode.value==='pretraining'&&n===1){base.value='';base.disabled=true}else{base.disabled=false;if(!base.value&&system?.models?.length){base.value=system.models[0].id}if(!base.value&&base.options.length>1){base.value=base.options[1].value}if(!base.value&&base.options.length===1){base.options[0].textContent=t('selectBaseModel')}}if(trigger)scheduleRecommendation()}async function recommendTraining(){",
 )
 PAGE = PAGE.replace(
     "$('startTraining').disabled=!r.feasible;",
@@ -472,7 +515,7 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     "$('preset').onchange=scheduleRecommendation;$('device').onchange=scheduleRecommendation;",
-    "$('preset').onchange=scheduleRecommendation;$('device').onchange=scheduleRecommendation;$('trainingMode').onchange=()=>syncTrainingMode(true);$('baseModel').onchange=()=>{if($('baseModel').value)$('trainingMode').value='fine_tuning';syncTrainingMode(true)};syncTrainingMode(false);",
+    "$('preset').onchange=scheduleRecommendation;$('device').onchange=scheduleRecommendation;$('trainingMode').onchange=()=>syncTrainingMode(true);$('trainingRound').oninput=()=>syncTrainingMode(true);$('optimizationGoal').onchange=scheduleRecommendation;$('baseModel').onchange=()=>{if($('baseModel').value&&Number($('trainingRound').value||1)===1){$('trainingRound').value=2}$('trainingMode').value=$('trainingMode').value==='pretraining'?'pretraining':'fine_tuning';syncTrainingMode(true)};syncTrainingMode(false);",
 )
 PAGE = PAGE.replace(
     "$('startTraining').disabled=!r.feasible||modelNameConflict;renderConfigImpact(r);",
@@ -489,6 +532,25 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     "</script></body></html>",
-    """function syncBaseModelSource(){const source=$('baseModelSource'),panel=$('downloadBasePanel');if(!source||!panel)return;panel.hidden=source.value!=='download';$('baseModel').disabled=$('trainingMode').value==='pretraining';}function renderModelDownload(s){const box=$('downloadBaseStatus');if(!box||!s)return;const zh=currentLang==='zh';if(s.status==='downloading'){box.textContent=(zh?'正在下载模型':'Downloading model')+(s.progress?` · ${s.progress}%`:'')}else if(s.status==='validating'){box.textContent=zh?'正在验证 Orbit checkpoint…':'Validating Orbit checkpoint…'}else if(s.status==='completed'){box.textContent=zh?`已下载并加入本地模型：${s.model}`:`Downloaded and added locally: ${s.model}`}else if(s.status==='failed'){box.textContent=(zh?'下载失败：':'Download failed: ')+(s.message||'')}else{box.textContent=''}}async function downloadBaseModel(){const url=$('downloadModelUrl')?.value.trim(),name=$('downloadModelName')?.value.trim();if(!url){toast(currentLang==='zh'?'请先填写模型 HTTPS 下载地址。':'Enter an HTTPS model URL first.');return}const button=$('downloadBaseButton');button.disabled=true;try{await request('/api/models/download',{method:'POST',body:JSON.stringify({url,model_name:name})});const timer=setInterval(async()=>{try{const s=await request('/api/models/downloading');renderModelDownload(s);if(['completed','failed'].includes(s.status)){clearInterval(timer);button.disabled=false;await refreshSystem();if(s.status==='completed'){const id=s.model||'';$('baseModelSource').value='local';syncBaseModelSource();if([...$('baseModel').options].some(o=>o.value===id))$('baseModel').value=id;$('trainingMode').value='fine_tuning';syncTrainingMode(false)}}}catch(e){clearInterval(timer);button.disabled=false;toast(e.message)}},800)}catch(e){button.disabled=false;toast(e.message)}}$('baseModelSource')?.addEventListener('change',syncBaseModelSource);$('downloadBaseButton')?.addEventListener('click',downloadBaseModel);syncBaseModelSource(); </script></body></html>""",
+    """function syncBaseModelSource(){const source=$('baseModelSource'),panel=$('downloadBasePanel');if(!source||!panel)return;panel.hidden=source.value!=='download';$('baseModel').disabled=$('trainingMode').value==='pretraining'&&Number($('trainingRound').value||1)===1;}function renderModelDownload(s){const box=$('downloadBaseStatus');if(!box||!s)return;const zh=currentLang==='zh';if(s.status==='downloading'){box.textContent=(zh?'正在下载模型':'Downloading model')+(s.progress?` · ${s.progress}%`:'')}else if(s.status==='validating'){box.textContent=zh?'正在验证 Orbit checkpoint…':'Validating Orbit checkpoint…'}else if(s.status==='completed'){box.textContent=zh?`已下载并加入本地模型：${s.model}`:`Downloaded and added locally: ${s.model}`}else if(s.status==='failed'){box.textContent=(zh?'下载失败：':'Download failed: ')+(s.message||'')}else{box.textContent=''}}async function downloadBaseModel(){const url=$('downloadModelUrl')?.value.trim(),name=$('downloadModelName')?.value.trim();if(!url){toast(currentLang==='zh'?'请先填写模型 HTTPS 下载地址。':'Enter an HTTPS model URL first.');return}const button=$('downloadBaseButton');button.disabled=true;try{await request('/api/models/download',{method:'POST',body:JSON.stringify({url,model_name:name})});const timer=setInterval(async()=>{try{const s=await request('/api/models/downloading');renderModelDownload(s);if(['completed','failed'].includes(s.status)){clearInterval(timer);button.disabled=false;await refreshSystem();if(s.status==='completed'){const id=s.model||'';$('baseModelSource').value='local';syncBaseModelSource();if([...$('baseModel').options].some(o=>o.value===id))$('baseModel').value=id;$('trainingMode').value='fine_tuning';syncTrainingMode(false)}}}catch(e){clearInterval(timer);button.disabled=false;toast(e.message)}},800)}catch(e){button.disabled=false;toast(e.message)}}$('baseModelSource')?.addEventListener('change',syncBaseModelSource);$('downloadBaseButton')?.addEventListener('click',downloadBaseModel);syncBaseModelSource(); </script></body></html>""",
+    1,
+)
+PAGE = PAGE.replace(
+    "function syncBaseModelSource(){",
+    "function syncCorpusPlan(){const plan=$('corpusPlan');if(!plan||plan.dataset.edited==='1')return;plan.value=$('trainingMode')?.value==='fine_tuning'?'专业文献/技术资料约25%；分类、情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮输入→输出任务约25%；高质量用户/助手对话约50%；最后加入少量 Orbit 身份样本。':'多篇文献、教材、技术文档、事实材料、代码和代码注释约80%；分类/情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮任务约10%；少量用户/助手对话和 Orbit 身份样本约10%。预训练第 1～N 次都保持文献为主。'}function syncBaseModelSource(){",
+)
+PAGE = PAGE.replace(
+    "syncBaseModelSource(); </script>",
+    "syncCorpusPlan();$('trainingMode')?.addEventListener('change',syncCorpusPlan);$('corpusPlan')?.addEventListener('input',()=>{ $('corpusPlan').dataset.edited='1'});syncBaseModelSource(); </script>",
+)
+
+# Make the distinction explicit in the final generated page: a model selector
+# is disabled only for pretraining round 1.  Choosing an external/downloaded
+# base switches to fine-tuning, because external weights cannot be trained
+# from random initialization.  Keep a visible reason when no local checkpoint
+# exists instead of leaving a seemingly broken empty selector.
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    """function syncBaseModelChoice(){const mode=$('trainingMode'),round=$('trainingRound'),source=$('baseModelSource'),base=$('baseModel');if(!mode||!base)return;const n=Math.max(1,Number(round?.value||1));if(source&&source.value!=='local'&&mode.value==='pretraining'){mode.value='fine_tuning';if(round)round.value=1}base.disabled=mode.value==='pretraining'&&Number(round?.value||1)===1;const help=document.querySelector('[data-i18n="baseModelHelp"]');if(help&&!system?.models?.length&&mode.value==='fine_tuning'){help.textContent=currentLang==='zh'?'当前没有可选的 Orbit checkpoint：先完成一次预训练，或下载并验证兼容的 Orbit checkpoint；外部模型不能从零训练。':'No Orbit checkpoint is available: complete one pretraining run or download and verify a compatible Orbit checkpoint. External models cannot be trained from scratch.'}else if(help){help.textContent=currentLang==='zh'?'微调必须选择已有模型；预训练第 1 次从随机权重开始，不能选择父模型。':'Fine-tuning requires an existing model; pretraining round 1 starts from random weights and has no parent.'}}$('trainingMode')?.addEventListener('change',()=>{syncTrainingMode(true);syncBaseModelSource();syncBaseModelChoice()});$('trainingRound')?.addEventListener('input',()=>{syncTrainingMode(true);syncBaseModelChoice()});$('baseModelSource')?.addEventListener('change',()=>{syncBaseModelSource();syncTrainingMode(true);syncBaseModelChoice()});$('baseModel')?.addEventListener('change',()=>{if($('baseModel').value&&Number($('trainingRound').value||1)===1&&$('trainingMode').value==='pretraining'){$('trainingMode').value='pretraining';$('trainingRound').value=2}syncBaseModelChoice()});syncBaseModelChoice(); </script></body></html>""",
     1,
 )

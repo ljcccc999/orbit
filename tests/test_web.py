@@ -141,10 +141,32 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "system.models[0].id" in PAGE
     assert 'id="baseModelSource"' in PAGE
     assert 'id="downloadBasePanel"' in PAGE
+    assert "function syncBaseModelChoice" in PAGE
+    assert "External models cannot be trained from scratch" in PAGE
+    assert "base_model_source:$('baseModelSource')?.value||'local'" in PAGE
     assert "/api/models/download" in PAGE
     assert 'id="community" class="page"' in PAGE
     assert "/api/community/submit" in PAGE
     assert "/api/training/recommendation" in PAGE
+
+
+def test_external_base_models_are_not_allowed_for_from_scratch_training(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    recommendation = runtime.training_recommendation({
+        "preset": "300m", "training_mode": "pretraining", "training_round": 1,
+        "base_model_source": "download", "device": "cpu",
+    })
+    assert recommendation["mode_valid"] is False
+    assert any(item["code"] == "external_pretrain_forbidden" for item in recommendation["training_advice"]["items"])
+    try:
+        runtime._training_mode({
+            "training_mode": "pretraining", "training_round": 1,
+            "base_model_source": "download",
+        })
+    except ValueError as exc:
+        assert "不能从零预训练" in str(exc)
+    else:
+        raise AssertionError("external base model unexpectedly passed from-scratch validation")
 
 
 def test_macos_desktop_exposes_standard_paste_command():
@@ -305,6 +327,42 @@ def test_secondary_training_records_parent_and_server_export(tmp_path):
         assert "GGUF" in str(exc) or ".gguf" in str(exc)
     else:
         raise AssertionError("native checkpoint must not be mislabeled as Ollama-compatible")
+
+
+def test_pretraining_rounds_preserve_parent_lineage_and_corpus_policy(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    payload = {
+        "preset": "local", "steps": 1, "batch_size": 1, "seq_len": 8,
+        "grad_accum": 1, "learning_rate": 3e-4, "warmup_steps": 0,
+        "checkpoint_every": 0, "device": "cpu",
+        "training_mode": "pretraining", "training_round": 1,
+        "model_name": "round-one", "text": "documents and code. " * 20,
+    }
+    for name, round_number, parent in [("round-one", 1, ""), ("round-two", 2, "round-one"), ("round-three", 3, "round-two")]:
+        runtime.start_training({**payload, "model_name": name, "training_round": round_number, "base_model": parent})
+        deadline = time.time() + 20
+        while runtime.training_state()["status"] in {"preparing", "running", "stopping"} and time.time() < deadline:
+            time.sleep(0.05)
+        assert runtime.training_state()["status"] == "completed"
+    rows = {row["id"]: row for row in runtime.list_models()}
+    assert rows["round-one"]["training_round"] == 1
+    assert rows["round-two"]["training_round"] == 2
+    assert rows["round-two"]["parent_model"] == "round-one"
+    assert rows["round-three"]["training_round"] == 3
+    assert rows["round-three"]["parent_model"] == "round-two"
+    assert rows["round-three"]["corpus_policy"]["dialogue_ratio"] == 0.1
+
+
+def test_training_recommendation_exposes_goal_and_task_mix(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    quality = runtime.training_recommendation({
+        "preset": "300m", "training_mode": "fine_tuning", "training_round": 1,
+        "base_model": "parent", "optimization_goal": "quality", "assisted": True,
+    })
+    policy = quality["training_advice"]["corpus_policy"]
+    assert quality["optimization_goal"] == "quality"
+    assert policy["dialogue_ratio"] == 0.5
+    assert "代码/SQL 生成" in policy["task_types"]
 
 
 def test_teacher_api_settings_persist_locally(tmp_path):

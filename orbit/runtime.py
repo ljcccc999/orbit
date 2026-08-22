@@ -393,22 +393,51 @@ class OrbitRuntime:
         goal_chars = max(0, min(20_000, int(payload.get("goal_chars", 0))))
         recommended_examples = min(100, scale_examples + min(20, goal_chars // 250))
         steps = max(100, min(2000, data_units * (20 if bool(payload.get("assisted")) else 8)))
+        optimization_goal = str(payload.get("optimization_goal", "balanced")).strip().lower() or "balanced"
+        if optimization_goal not in {"fast", "memory", "quality", "balanced"}:
+            raise ValueError("训练优化目标必须是省时间、省内存、效果优先或平衡")
+        if optimization_goal == "fast":
+            seq_len = min(seq_len, 384)
+            steps = max(50, min(2000, round(steps * 0.65)))
+            recommended_examples = min(100, max(10, round(recommended_examples * 0.7)))
+        elif optimization_goal == "memory":
+            seq_len = min(seq_len, 256)
+            steps = max(50, min(2000, round(steps * 0.8)))
+            recommended_examples = min(100, max(10, round(recommended_examples * 0.8)))
+        elif optimization_goal == "quality":
+            seq_len = max(seq_len, min(base.seq_len, 1024))
+            steps = max(100, min(2000, round(steps * 1.5)))
+            recommended_examples = min(100, max(recommended_examples, round(recommended_examples * 1.25)))
         warmup = max(10, min(200, steps // 10))
         checkpoint_every = max(25, min(250, steps // 5))
         config = base.with_overrides(
             steps=steps,
             batch_size=1 if pressure > 0.55 or device == "cpu" or local_mps else base.batch_size,
             seq_len=seq_len,
-            grad_accum=(1 if preset == "300m" else max(1, base.grad_accum // 4)) if local_mps else base.grad_accum,
+            grad_accum=(1 if optimization_goal in {"fast", "memory"} or preset == "300m" else max(1, base.grad_accum // 4)) if local_mps else (1 if optimization_goal == "memory" else base.grad_accum),
             warmup_steps=warmup,
             checkpoint_every=checkpoint_every,
             precision="fp32" if local_mps else "auto",
         )
+        if optimization_goal == "memory":
+            config = config.with_overrides(batch_size=1, seq_len=min(config.seq_len, 256), grad_accum=1)
+        elif optimization_goal == "fast":
+            config = config.with_overrides(batch_size=1, grad_accum=1, checkpoint_every=max(steps, 1000))
+        elif optimization_goal == "quality":
+            config = config.with_overrides(steps=min(2000, max(config.steps, round(config.steps * 1.2))))
         base_model = str(payload.get("base_model", "")).strip()
         requested_mode = str(payload.get("training_mode", "")).strip().lower()
+        base_source = str(payload.get("base_model_source", "local")).strip().lower() or "local"
         if requested_mode not in {"pretraining", "fine_tuning"}:
             requested_mode = "fine_tuning" if base_model else "pretraining"
-        mode_valid = requested_mode != "fine_tuning" or bool(base_model)
+        training_round = self._training_round(payload, base_model or None)
+        mode_valid = (
+            bool(base_model)
+            if requested_mode == "fine_tuning" or training_round > 1
+            else not base_model
+        )
+        if requested_mode == "pretraining" and base_source != "local":
+            mode_valid = False
         requested_steps = max(1, int(payload.get("steps", 0) or config.steps))
         requested_batch = max(1, int(payload.get("batch_size", 0) or config.batch_size))
         requested_accum = max(1, int(payload.get("grad_accum", 0) or config.grad_accum))
@@ -419,8 +448,25 @@ class OrbitRuntime:
         effective_batch = requested_batch * requested_accum
         estimated_updates_per_corpus = max(1, (estimated_sequences + effective_batch - 1) // effective_batch) if estimated_sequences else 0
         advice: list[dict[str, str]] = []
+        goal_titles = {
+            "fast": {"zh": "省时间", "en": "Time saving"},
+            "memory": {"zh": "省内存", "en": "Memory saving"},
+            "quality": {"zh": "效果优先（不计时间）", "en": "Quality first (time is not a constraint)"},
+            "balanced": {"zh": "平衡", "en": "Balanced"},
+        }
+        advice.append({
+            "severity": "info", "code": "optimization_goal",
+            "zh": f"当前参数目标：{goal_titles[optimization_goal]['zh']}。样本数、步数、序列长度、梯度累计和 checkpoint 频率都会随目标调整；仍可在高级参数中手动修改。",
+            "en": f"Optimization target: {goal_titles[optimization_goal]['en']}. Sample count, steps, sequence length, accumulation and checkpoint frequency are adjusted together; you can still edit advanced values manually.",
+        })
+        policy = self._corpus_policy(requested_mode)
+        advice.append({
+            "severity": "info", "code": "corpus_policy",
+            "zh": f"语料建议：{policy['description']}。结构化任务包括分类/情感分析、NER、代码/SQL、摘要和扩写/润色；这些是单轮输入→输出，不是聊天气泡。",
+            "en": f"Corpus policy: {policy['description']}. Structured tasks include classification/sentiment, NER, code/SQL, summarization and expansion/polishing; these are single-turn input→output tasks, not chat bubbles.",
+        })
         if requested_mode == "fine_tuning":
-            mode_title = {"zh": "微调（基于已有模型）", "en": "Fine-tuning (from an existing model)"}
+            mode_title = {"zh": "微调（专业文献 + 约 50% 对话）", "en": "Fine-tuning (specialized documents + about 50% dialogue)"}
             if not base_model:
                 advice.append({
                     "severity": "warning", "code": "finetune_parent_required",
@@ -435,11 +481,33 @@ class OrbitRuntime:
                 })
             advice.append({
                 "severity": "info", "code": "finetune_data",
-                "zh": "微调不会重新学习整个世界知识；它主要改变已有模型的行为、格式和领域表达。",
-                "en": "Fine-tuning does not relearn broad world knowledge; it mainly changes behavior, formatting, and domain expression.",
+                "zh": "微调使用专业文献和约 50% 对话样本：文献提供领域知识，对话提供指令遵循、表达和交互格式。",
+                "en": "Fine-tuning uses specialized documents and about 50% dialogue: documents provide domain knowledge, while dialogue teaches instruction following and interaction format.",
             })
         else:
-            mode_title = {"zh": "从零预训练（随机初始化）", "en": "From-scratch pretraining (random initialization)"}
+            mode_title = (
+                {"zh": "预训练第 1 次（文献为主 + 少量对话）", "en": "Pretraining round 1 (document-first + a small amount of dialogue)"}
+                if training_round == 1
+                else {"zh": f"Orbit 继续预训练第 {training_round} 次（文献为主 + 少量对话）", "en": f"Orbit continued pretraining round {training_round} (document-first + a small amount of dialogue)"}
+            )
+            if training_round > 1 and not base_model:
+                advice.append({
+                    "severity": "warning", "code": "continued_pretrain_parent_required",
+                    "zh": f"这是 Orbit 继续预训练第 {training_round} 次，必须选择第 {training_round - 1} 次生成的父模型；否则会重新从随机权重开始。",
+                    "en": f"This is Orbit continued pretraining round {training_round}; select the model from round {training_round - 1} or it will start from random weights again.",
+                })
+            if training_round == 1 and base_model:
+                advice.append({
+                    "severity": "warning", "code": "first_pretrain_no_parent",
+                    "zh": "预训练第 1 次从随机权重开始，不能选择父模型；如果要接着 Orbit 训练，请把训练次数改为父模型次数 + 1。",
+                    "en": "Pretraining round 1 starts from random weights and cannot use a parent; to continue Orbit training, set the round to the parent round + 1.",
+                })
+            if base_source != "local":
+                advice.append({
+                    "severity": "warning", "code": "external_pretrain_forbidden",
+                    "zh": "外部或下载模型不能从零训练；它必须作为基础模型进入微调。请选择‘微调（已有模型）’，并从模型列表选择 checkpoint。",
+                    "en": "External or downloaded models cannot be trained from scratch. Use them as a fine-tuning base: choose ‘Fine-tuning (existing model)’ and select a checkpoint.",
+                })
             if requested_examples < 500 or requested_steps < 1000:
                 advice.append({
                     "severity": "warning", "code": "pretrain_small",
@@ -448,8 +516,8 @@ class OrbitRuntime:
                 })
             advice.append({
                 "severity": "info", "code": "pretrain_units",
-                "zh": "‘步数 × batch × 梯度累计’不等于数据集遍历次数；文献会先按序列长度切成 token 片段，真实覆盖率要等语料生成后按 token 统计。",
-                "en": "Steps × batch × gradient accumulation is not the number of dataset passes; documents are packed into token sequences first. True coverage should be measured from token counts after generation.",
+                "zh": "预训练第 1～N 次都以多篇文献、教材、技术资料或代码为主，只加入少量对话和身份样本；‘步数 × batch × 梯度累计’不等于数据集遍历次数。",
+                "en": "Pretraining rounds 1–N are document-first: use many papers, books, technical references or code, with only a small dialogue and identity tail. Steps × batch × accumulation is not the number of corpus passes.",
             })
         if requested_seq >= 2048:
             advice.append({
@@ -467,10 +535,15 @@ class OrbitRuntime:
             "mode": requested_mode,
             "mode_title": mode_title,
             "base_model": base_model or None,
+            "base_model_source": base_source,
+            "training_round": training_round,
+            "corpus_policy": self._corpus_policy(requested_mode),
+            "optimization_goal": optimization_goal,
+            "optimization_goal_title": goal_titles[optimization_goal],
             "mode_valid": mode_valid,
             "items": advice,
             "requested": {
-                "steps": requested_steps, "examples": requested_examples,
+                "steps": requested_steps, "examples": requested_examples, "training_round": training_round,
                 "batch_size": requested_batch, "grad_accum": requested_accum, "seq_len": requested_seq,
             },
             "dataset_estimate": {
@@ -511,6 +584,9 @@ class OrbitRuntime:
             "estimate_note": "粗略估算；训练开始后会用实际步速和 ETA 替换。教师 API 生成时间另计。",
             "training_advice": training_advice,
             "training_mode": requested_mode,
+            "training_round": training_round,
+            "base_model_source": base_source,
+            "optimization_goal": optimization_goal,
             "mode_valid": mode_valid,
         }
 
@@ -831,19 +907,64 @@ class OrbitRuntime:
         """
         parent = str(payload.get("base_model", "")).strip() or None
         mode = str(payload.get("training_mode", "")).strip().lower()
+        base_source = str(payload.get("base_model_source", "local")).strip().lower() or "local"
+        if base_source not in {"local", "download", "external"}:
+            raise ValueError("基础模型来源无效")
         if mode not in {"pretraining", "fine_tuning"}:
             mode = "fine_tuning" if parent else "pretraining"
+        training_round = OrbitRuntime._training_round(payload, parent)
         if mode == "pretraining":
-            parent = None
+            if base_source != "local" and require_valid:
+                raise ValueError("外部或下载模型不能从零预训练；请选择微调并选择一个基础模型")
+            if training_round == 1:
+                if parent and require_valid:
+                    raise ValueError("预训练第 1 次不能选择父模型；如果要继续 Orbit 训练，请把训练次数设为父模型次数 + 1")
+                parent = None
+            elif require_valid and not parent:
+                raise ValueError(f"预训练第 {training_round} 次必须选择第 {training_round - 1} 次的父模型")
         elif require_valid and not parent:
             raise ValueError("已选择微调，请先选择一个已有模型；或者切换为预训练（从零开始）")
         return mode, parent
+
+    @staticmethod
+    def _training_round(payload: dict[str, Any], parent_model: str | None = None) -> int:
+        raw = payload.get("training_round")
+        if raw is None or str(raw).strip() == "":
+            return 2 if parent_model else 1
+        try:
+            value = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("训练次数必须是大于等于 1 的整数") from exc
+        if value < 1 or value > 1000:
+            raise ValueError("训练次数必须在 1 到 1000 之间")
+        return value
+
+    @staticmethod
+    def _corpus_policy(training_mode: str) -> dict[str, Any]:
+        if training_mode == "fine_tuning":
+            return {
+                "name": "specialized_documents_plus_dialogue",
+                "document_ratio": 0.25,
+                "structured_task_ratio": 0.25,
+                "dialogue_ratio": 0.5,
+                "task_types": ["分类/情感分析", "实体抽取（NER）", "代码/SQL 生成", "摘要总结", "文本扩写/润色"],
+                "description": "专业文献约 25%，分类/NER/代码/SQL/摘要/扩写等单轮任务约 25%，对话约 50%",
+            }
+        return {
+            "name": "document_first_with_small_dialogue_tail",
+            "document_ratio": 0.8,
+            "structured_task_ratio": 0.1,
+            "dialogue_ratio": 0.1,
+            "task_types": ["分类/情感分析", "实体抽取（NER）", "代码/SQL 生成", "摘要总结", "文本扩写/润色"],
+            "description": "多篇文献、教材、技术资料与代码约 80%，单轮结构化任务约 10%，少量对话和身份样本约 10%",
+        }
 
     def _teacher_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         preset = str(payload.get("preset", "300m")).lower()
         cfg = OrbitConfig.for_preset(preset)
         train_cfg = self._training_config(payload)
         training_mode, parent_model = self._training_mode(payload, require_valid=False)
+        training_round = self._training_round(payload, parent_model)
         return {
             "preset": preset,
             "parameters": cfg.estimate_parameters(),
@@ -853,7 +974,9 @@ class OrbitRuntime:
             "context_length": train_cfg.seq_len,
             "training_steps": train_cfg.steps,
             "training_mode": training_mode,
+            "training_round": training_round,
             "base_model": parent_model,
+            "corpus_policy": self._corpus_policy(training_mode),
             "model_name": str(payload.get("model_name", "")).strip() or None,
             "data_language": self._data_language(payload),
         }
@@ -873,12 +996,18 @@ class OrbitRuntime:
         cfg = OrbitConfig.for_preset(preset)
         require_training_capacity(cfg.estimated_training_memory_gb(), cfg.estimate_parameters(), self.models_root)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        _, parent_model = self._training_mode(payload)
+        training_mode, parent_model = self._training_mode(payload)
+        training_round = self._training_round(payload, parent_model)
         if parent_model:
             self._checkpoint_for(parent_model)
-            parent_preset = str(self._model_metadata(parent_model).get("preset", ""))
+            parent_metadata = self._model_metadata(parent_model)
+            parent_preset = str(parent_metadata.get("preset", ""))
             if parent_preset and parent_preset != preset:
                 raise ValueError(f"二次训练必须保持父模型规模：请选择 {parent_preset.upper()}")
+            if training_mode == "pretraining":
+                parent_round = max(1, int(parent_metadata.get("training_round", 1) or 1))
+                if training_round != parent_round + 1:
+                    raise ValueError(f"Orbit 继续预训练必须是第 {parent_round + 1} 次；当前选择了第 {training_round} 次")
         resume_model_id = str(payload.get("_resume_model_id", "")).strip()
         if resume_model_id:
             checkpoint = self._checkpoint_for(resume_model_id)
@@ -907,6 +1036,8 @@ class OrbitRuntime:
 
     def _run_local_training(self, payload: dict[str, Any], text: str) -> None:
         self.unload_model()
+        training_mode, parent_model = self._training_mode(payload)
+        training_round = self._training_round(payload, parent_model)
         preset, train_cfg, checkpoint, model_id, display_name, parent_model = self._prepare_training(payload, text)
         with self._state_lock:
             # Publish the target before creating the worker.  This makes a
@@ -942,8 +1073,12 @@ class OrbitRuntime:
             "completed_at": None, "model_id": model_id, "model_name": display_name,
             "preset": preset, "parameters": cfg.estimate_parameters(), "parent_model": parent_model,
             "assisted": bool(payload.get("_assisted")), "training_goal": str(payload.get("instruction", "")),
-            "training_mode": "fine_tuning" if parent_model else "pretraining",
-            "corpus_mode": "mixed" if parent_model else "document",
+            "training_mode": training_mode,
+            "training_round": training_round,
+            "base_model_source": str(payload.get("base_model_source", "local")),
+            "corpus_mode": "fine_tuning" if training_mode == "fine_tuning" else "pretraining",
+            "corpus_plan": str(payload.get("corpus_plan", "")),
+            "corpus_policy": self._corpus_policy(training_mode),
             "identity_training_injected": True,
             "dataset": str(dataset), "training_dataset": str(training_dataset),
             "training_config": train_cfg.__dict__, "device": requested_device,
@@ -956,7 +1091,10 @@ class OrbitRuntime:
             "name": display_name, "display_name": display_name, "model_id": model_id,
             "preset": preset, "parameters": cfg.estimate_parameters(),
             "identity": "Orbit", "developer": "YUNSH", "system_prompt": ORBIT_IDENTITY,
-            "training_mode": "fine_tuning" if parent_model else "pretraining", "parent_model": parent_model,
+            "training_mode": training_mode, "training_round": training_round, "parent_model": parent_model,
+            "base_model_source": str(payload.get("base_model_source", "local")),
+            "corpus_plan": str(payload.get("corpus_plan", "")),
+            "corpus_policy": self._corpus_policy(training_mode),
             "identity_training_examples": ORBIT_TRAINING_ANCHOR,
             "training_runs": [run_id], "architecture": "orbit-hybrid-moe-v1", "ollama_ready": False,
             "created_at": run["created_at"],
@@ -1127,7 +1265,9 @@ class OrbitRuntime:
             model=str(payload.get("teacher_model", "deepseek-v4-flash")),
             instruction=str(payload.get("instruction", "")), examples=int(payload.get("examples", 20)),
             language=str(payload.get("language", "中文")),
-            corpus_mode=("mixed" if self._training_mode(payload, require_valid=False)[0] == "fine_tuning" else "document"),
+            corpus_mode=("fine_tuning" if self._training_mode(payload, require_valid=False)[0] == "fine_tuning" else "pretraining"),
+            training_round=self._training_round(payload, str(payload.get("base_model", "")).strip() or None),
+            corpus_plan=str(payload.get("corpus_plan", "")).strip(),
             model_profile=self._teacher_model_profile(payload),
         )
         teacher.validate()
@@ -1304,6 +1444,7 @@ class OrbitRuntime:
             "model_name": str(run.get("model_name") or model_id),
             "preset": str(run.get("preset", "300m")),
             "training_mode": str(run.get("training_mode") or ("fine_tuning" if run.get("parent_model") else "pretraining")),
+            "training_round": int(run.get("training_round", 2 if run.get("parent_model") else 1) or 1),
             "base_model": str(run.get("parent_model") or ""), "device": str(run.get("device", "auto")),
             "data_language": str(run.get("data_language", "bilingual")),
             "_dataset_path": str(dataset), "_resume_model_id": model_id,
@@ -1403,6 +1544,10 @@ class OrbitRuntime:
             training_config=train_cfg, model_name=model_name,
             data_language=str(payload.get("data_language", "bilingual")),
             assistant=assistant,
+            training_mode=str(payload.get("training_mode", "pretraining")),
+            training_round=int(payload.get("training_round", 1) or 1),
+            base_model=str(payload.get("base_model", "")),
+            optimization_goal=str(payload.get("optimization_goal", "balanced")),
         )
         cfg = OrbitConfig.for_preset(preset)
         with self._state_lock:

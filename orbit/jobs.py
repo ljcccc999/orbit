@@ -18,6 +18,8 @@ def create_job_bundle(
     learning_rate: float, text: str, name: str = "orbit-training",
     training_config: TrainingConfig | None = None, model_name: str = "orbit",
     data_language: str = "bilingual", assistant: dict | None = None,
+    training_mode: str = "pretraining", training_round: int = 1,
+    base_model: str = "", optimization_goal: str = "balanced",
 ) -> Path:
     """Create a portable remote-GPU training job without running it locally."""
     if preset not in {"local", "300m", "1b", "3b", "7b", "14b", "38b"}:
@@ -45,6 +47,15 @@ def create_job_bundle(
         "system_prompt": ORBIT_SYSTEM_PROMPT,
         "identity_training_examples": ORBIT_TRAINING_ANCHOR,
         "data_language": data_language,
+        "training_mode": training_mode,
+        "training_round": int(training_round),
+        "base_model": base_model or None,
+        "optimization_goal": optimization_goal,
+        "corpus_policy": (
+            {"document_ratio": 0.25, "structured_task_ratio": 0.25, "dialogue_ratio": 0.5}
+            if training_mode == "fine_tuning"
+            else {"document_ratio": 0.8, "structured_task_ratio": 0.1, "dialogue_ratio": 0.1}
+        ),
         "ai_assisted": bool(assistant),
         "generated_locally": True,
         "bundle_kind": "gpu_training",
@@ -79,6 +90,8 @@ def create_job_bundle(
             "examples": int(assistant.get("examples", 20)),
             "language": str(assistant.get("language", data_language)),
             "corpus_mode": str(assistant.get("corpus_mode", "document")),
+            "training_round": int(assistant.get("training_round", training_round) or training_round),
+            "corpus_plan": str(assistant.get("corpus_plan", "")),
             "model_profile": assistant.get("model_profile") or {},
         }
         if not assistant_config["base_url"] or not assistant_config["model"] or not assistant_config["instruction"]:

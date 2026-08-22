@@ -20,6 +20,8 @@ class TeacherConfig:
     examples: int = 20
     language: str = "中文"
     corpus_mode: str = "document"
+    training_round: int = 1
+    corpus_plan: str = ""
     model_profile: dict | None = None
 
     def endpoint(self) -> str:
@@ -42,8 +44,12 @@ class TeacherConfig:
             raise ValueError("请填写不超过 20,000 字的训练目标")
         if not 1 <= self.examples <= 100:
             raise ValueError("自动生成样本数必须在 1 到 100 之间")
-        if self.corpus_mode not in {"document", "mixed"}:
-            raise ValueError("训练语料模式必须是 document 或 mixed")
+        if self.corpus_mode not in {"document", "mixed", "pretraining", "fine_tuning"}:
+            raise ValueError("训练语料模式必须是 document、pretraining 或 fine_tuning")
+        if not 1 <= int(self.training_round) <= 1000:
+            raise ValueError("训练次数必须在 1 到 1000 之间")
+        if len(self.corpus_plan) > 20_000:
+            raise ValueError("语料规划不能超过 20,000 字")
 
 
 def _request(endpoint: str, api_key: str, body: dict, attempts: int = 3, stop_event: Event | None = None) -> dict:
@@ -116,10 +122,33 @@ def generate_dataset(
             "en": "Use English as the primary language.",
             "bilingual": "必须同时使用简体中文和 English；每一段都要包含中文和英文内容，尽量提供语义对应的双语段落，禁止整段只写英文或只写中文。",
         }.get(config.language, f"主要语言：{config.language}")
-        if config.corpus_mode == "mixed":
+        if config.corpus_mode == "fine_tuning":
+            document_count = round(count * 0.25)
+            task_count = round(count * 0.25)
+            dialogue_count = count - document_count - task_count
+            composition = (
+                f"这批 {count} 段样本尽量包含约 {document_count} 段专业文献/技术资料、约 {task_count} 段单轮结构化任务、约 {dialogue_count} 段对话（总体目标约 25%/25%/50%）。"
+                if count >= 4
+                else f"本次只有 {count} 段样本，不能在单批次强行凑出三类比例；请按 25%/25%/50% 的总体目标优先保证类型多样，后续批次补足比例。"
+            )
             style_instruction = (
-                "语料以长篇文献、教材、技术文档、事实材料、代码和代码注释为主，约 80% 为连续文档语料；"
-                "其余约 20% 可以是简短的用户/助手对话，用来学习自然交流。最后保留少量身份和交流样本。"
+                composition
+                + "单轮结构化任务不是聊天气泡，不要添加 user/assistant 对话格式；必须覆盖分类/情感分析、实体抽取（NER）、代码或 SQL 生成、摘要总结、文本扩写/润色等类型，使用清晰的输入→输出格式。"
+                + "对话部分才使用 user/assistant 格式，并保留少量 Orbit 身份和交流样本。"
+            )
+        elif config.corpus_mode in {"pretraining", "mixed"}:
+            document_count = round(count * 0.8)
+            task_count = round(count * 0.1)
+            dialogue_count = count - document_count - task_count
+            composition = (
+                f"这是预训练第 1～N 次的文献优先语料：本批 {count} 段尽量包含约 {document_count} 段长篇文献/教材/技术资料/代码、约 {task_count} 段单轮任务、约 {dialogue_count} 段对话（总体目标约 80%/10%/10%）；"
+                if count >= 5
+                else f"这是预训练第 1～N 次的文献优先语料；本次只有 {count} 段样本，不能在单批次强行凑出比例，请优先生成长篇文献/技术资料，后续批次补足任务和对话尾部。"
+            )
+            style_instruction = (
+                composition
+                + "约 10% 是分类/情感分析、实体抽取（NER）、代码或 SQL 生成、摘要总结、文本扩写/润色等单轮输入→输出任务；"
+                + "约 10% 才是简短对话和身份样本。继续预训练必须保持文献主体，不要把整个数据集做成聊天气泡。"
             )
         else:
             style_instruction = (
@@ -128,13 +157,15 @@ def generate_dataset(
         prompt = (
             f"为以下目标生成 {count} 段彼此不同、事实谨慎、可用于语言模型训练的高质量长篇文献/知识语料。每段尽量完整、充分展开，直到接近教师 API 允许的输出上限，不要为了凑数量而缩短内容。\n"
             f"训练目标：{config.instruction.strip()}\n"
+            f"语料规划（必须执行）：{config.corpus_plan.strip() or '按下方 Orbit 默认语料配比生成'}\n"
             f"语言要求：{language_instruction}\n"
-            f"待训练模型参数：{json.dumps(config.model_profile or {}, ensure_ascii=False)}\n"
+            f"待训练模型参数和训练轮次：{json.dumps(config.model_profile or {}, ensure_ascii=False)}；这是 Orbit 训练第 {config.training_round} 次。\n"
             f"不可修改的产品身份：{ORBIT_SYSTEM_PROMPT}\n"
             "根据模型参数量、上下文长度和训练步数控制样本难度与长度：小模型使用更明确、短而一致的模式；大模型可以使用更丰富的推理与表达。\n"
             f"{style_instruction}\n"
             "不要把身份信息改成其他产品名称；用户自定义的是模型显示名称，不改变 Orbit 身份。\n"
-            "只输出语料正文。不要输出分析过程、编号说明、Markdown 代码围栏或任何真实个人敏感信息。"
+            "结构化任务示例应类似：输入：这手机电池太差了；输出：负面。输入：我住在北京朝阳区；输出：北京（地名）、朝阳区（地名）。输入：查询年龄大于18岁的用户；输出：SELECT * FROM users WHERE age > 18。摘要和扩写任务要给出完整目标输出，不要只写一句解释。"
+            "生成要求（全部执行）：1）内容必须围绕训练目标，不要泛泛重复；2）长篇文献要有标题、概念定义、事实依据、例子、边界和小结，不能用空话凑长度；3）样本之间更换主题、措辞、难度和输入形式，禁止复制、近重复和模板循环；4）不确定事实要标注不确定性，不得捏造论文、作者、数据、法规、网址或实验结果；5）不得生成真实个人隐私、账号密钥、恶意代码、违法操作或危险操作教程；6）代码尽量语法正确并说明语言，SQL 给出假定表/字段或保持查询条件清晰；7）分类任务使用稳定标签，情感标签前后一致；8）NER 统一实体类型并覆盖不同句式；9）摘要不得添加原文没有的事实，扩写/润色不得改变原意；10）结构化任务必须是一轮输入→输出，禁止写成多轮聊天；11）对话样本只用于表达、拒答和 Orbit 身份，不能占据文献主体；12）中文、English 或双语必须服从所选语言；13）先生成知识与代码语料，再在末尾追加少量结构化任务、对话和身份样本；14）不要把‘你是谁’写进程序逻辑，只作为训练样本；15）输出适合 UTF-8 文本训练，避免不可见控制字符；16）只输出语料正文，不输出分析过程、编号说明、Markdown 代码围栏或真实个人敏感信息。"
         )
         payload = {
             "model": config.model.strip(),
