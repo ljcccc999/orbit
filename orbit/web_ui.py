@@ -137,6 +137,27 @@ PAGE = PAGE.replace(
     ".orbit-status-button{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 9px 4px 5px;background:rgba(255,255,255,.66);color:var(--ink);font-size:11px;font-weight:700;-webkit-app-region:no-drag}.orbit-status-button img{width:20px;height:20px;object-fit:contain}.orbit-status-button:hover{background:rgba(255,255,255,.9)}.content,.page,.layout,.panel,#train,.training-content,.run-list,.run-detail,.messages,.community-detail,.community-list{-webkit-app-region:no-drag}</style>",
     1,
 )
+
+# Keep the manual-data guidance explicitly separated by training mode. This
+# runs after language initialization so the user sees the correct recipe
+# before entering content.
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    """function updateCorpusGuidance(){const mode=document.getElementById('trainingMode')?.value||'pretraining',manual=document.querySelector('[data-i18n="manualContentAdvice"]'),plan=document.getElementById('corpusPlan');const zh=currentLang==='zh';if(manual)manual.textContent=mode==='fine_tuning'?(zh?'微调人工建议：专业文献、产品资料、术语、代码规范、标注规则，以及约 50% 高质量指令对话。人工内容负责你希望 Orbit 记住的专属知识；AI 辅助负责基础认知、通用编程模式和基础任务。':'Fine-tuning manual advice: specialized documents, product material, terminology, coding conventions, labeling rules, and about 50% high-quality instruction dialogue. Manual data teaches the specific knowledge you want Orbit to remember; AI assistance supplies foundational knowledge, general coding patterns and basic tasks.'):(zh?'预训练人工建议：多篇清洗后的文献、教材、技术资料、代码、代码注释和项目专属知识；按主题去重、过滤低质量内容，不要只写几句问答。AI 辅助负责基础认知、通用语言能力和基础任务。':'Pretraining manual advice: many cleaned documents, books, technical references, code, comments and project-specific knowledge. Deduplicate by topic and filter low-quality text; do not provide only a few Q&A lines. AI assistance supplies foundational knowledge, general language ability and basic tasks.');if(plan&&!plan.dataset.edited){plan.value=mode==='fine_tuning'?(zh?'人工约25%专业文献；约25%单轮分类/NER/代码/SQL/摘要/扩写任务；约50%高质量对话。AI 负责基础认知、通用编程模式和基础任务；人工负责专属知识。':'About 25% manual specialized documents; 25% single-turn classification/NER/code/SQL/summarization/rewriting tasks; 50% high-quality dialogue. AI supplies foundational knowledge and general coding patterns; manual data supplies specific knowledge.'):(zh?'人工文献/教材/技术资料/代码为主；AI 生成基础认知、通用语言和基础任务；整体保持文献优先，最后只加入少量对话与身份样本。':'Manual documents/books/technical references/code are primary. AI generates foundational knowledge, general language and basic tasks. Keep the corpus document-first, with only a small dialogue and identity tail.')}}updateCorpusGuidance();document.getElementById('trainingMode')?.addEventListener('change',updateCorpusGuidance); </script></body></html>""",
+    1,
+)
+
+# Fine-tuning never changes the architecture scale. Keep the selector aligned
+# with the selected parent checkpoint and explain that only training settings
+# are adjustable.
+if "</script></body></html>" in PAGE:
+    _page_head, _page_tail = PAGE.rsplit("</script></body></html>", 1)
+    PAGE = _page_head + """function syncFineTuneScale(){const mode=$('trainingMode'),parent=$('baseModel'),scale=$('preset');if(!mode||!parent||!scale)return;const row=(system?.models||[]).find(x=>x.id===parent.value),locked=String(row?.preset||'').toLowerCase(),fine=mode.value==='fine_tuning';if(fine&&locked&&[...scale.options].some(o=>o.value===locked)){if(scale.value!==locked){scale.value=locked;scheduleRecommendation()}scale.disabled=true;scale.title=currentLang==='zh'?`微调固定为基础模型规模：${locked.toUpperCase()}；不能修改 M/B，只能调整训练参数。`:`Fine-tuning is locked to the base model scale: ${locked.toUpperCase()}; M/B cannot be changed, only training parameters can be adjusted.`}else{scale.disabled=fine&&Boolean(parent.value);scale.title=fine?(currentLang==='zh'?'请先选择基础模型；微调规模会自动锁定。':'Select a base model; fine-tuning scale will be locked automatically.') : ''}}$('baseModel')?.addEventListener('change',syncFineTuneScale);$('trainingMode')?.addEventListener('change',syncFineTuneScale);$('preset')?.addEventListener('change',syncFineTuneScale);setTimeout(syncFineTuneScale,350); </script></body></html>""" + _page_tail
+# Keep the document parser boundary explicit. A string-based UI replacement
+# can otherwise consume the closing style tag, making WebKit treat the whole
+# page as stylesheet text and showing a white native window.
+if "</style>" not in PAGE:
+    PAGE = PAGE.replace("</head>", "</style></head>", 1)
 # Do not reset the training form on window focus or visibility changes.
 PAGE = PAGE.replace("const result=await request('/api/update/install',{method:'POST',body:'{}'});$('updateStatus').textContent=t('updateInstalling');toast(t('updateInstalling'));", "const result=await request('/api/update/install',{method:'POST',body:'{}'});const queued=result.status==='queued_after_training';$('updateStatus').textContent=t(queued?'updateQueued':'updateInstalling');toast(t(queued?'updateQueued':'updateInstalling'));")
 PAGE = PAGE.replace('<button data-page="api"><span class="icon">⌘</span><span>API</span></button></nav>', '<button data-page="api"><span class="icon">⌘</span><span>API</span></button><button data-page="settings"><span class="icon">⚙</span><span data-i18n="navSettings">Settings</span></button></nav>')
@@ -593,7 +614,7 @@ PAGE = PAGE.replace(
 # inserted at the end so it survives the page's earlier compatibility patches.
 PAGE = PAGE.replace(
     "</style>",
-    ".generated-content-panel{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.42)}.generated-content-panel pre{max-height:360px;margin:10px 0 0;overflow:auto;white-space:pre-wrap;word-break:break-word}",
+    ".generated-content-panel{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.42)}.generated-content-panel pre{max-height:360px;margin:10px 0 0;overflow:auto;white-space:pre-wrap;word-break:break-word}</style>",
     1,
 )
 PAGE = PAGE.replace(

@@ -439,11 +439,24 @@ class OrbitRuntime:
         if requested_mode not in {"pretraining", "fine_tuning"}:
             requested_mode = "fine_tuning" if base_model else "pretraining"
         training_round = self._training_round(payload, base_model or None)
+        parent_preset = None
+        if requested_mode == "fine_tuning" and base_model:
+            parent_preset = str(self._model_metadata(base_model).get("preset", "")).lower() or None
+        # Fine-tuning should make smaller, conservative updates to an existing
+        # checkpoint. There is no universal magic value, but a lower learning
+        # rate and a bounded first pass are safer defaults than reusing the
+        # from-scratch pretraining schedule.
+        if requested_mode == "fine_tuning":
+            config = config.with_overrides(
+                learning_rate=min(config.learning_rate, 1e-4),
+                steps=max(60, min(config.steps, 600)),
+            )
         mode_valid = (
             bool(base_model)
             if requested_mode == "fine_tuning" or training_round > 1
             else not base_model
         )
+        mode_valid = mode_valid and not (requested_mode == "fine_tuning" and parent_preset in PRESETS and parent_preset != preset)
         if requested_mode == "pretraining" and base_source != "local":
             mode_valid = False
         requested_steps = max(1, int(payload.get("steps", 0) or config.steps))
@@ -456,6 +469,12 @@ class OrbitRuntime:
         effective_batch = requested_batch * requested_accum
         estimated_updates_per_corpus = max(1, (estimated_sequences + effective_batch - 1) // effective_batch) if estimated_sequences else 0
         advice: list[dict[str, str]] = []
+        if requested_mode == "fine_tuning" and parent_preset in PRESETS and parent_preset != preset:
+            advice.append({
+                "severity": "warning", "code": "finetune_scale_locked",
+                "zh": f"微调基础模型是 {parent_preset.upper()}，但当前选择了 {preset.upper()}。微调不会改变模型规模；请把模型规模改回 {parent_preset.upper()}，只调整训练参数。",
+                "en": f"The fine-tuning base model is {parent_preset.upper()}, but the selected scale is {preset.upper()}. Fine-tuning never changes model size; select {parent_preset.upper()} and adjust training parameters only.",
+            })
         goal_titles = {
             "fast": {"zh": "省时间", "en": "Time saving"},
             "memory": {"zh": "省内存", "en": "Memory saving"},
@@ -477,6 +496,11 @@ class OrbitRuntime:
             "severity": "info", "code": "manual_ai_roles",
             "zh": "如果同时使用人工语料和 AI 辅助：AI 生成基础认知、通用语言/代码模式和少量基础任务；人工语料只放你希望 Orbit 学会的专属内容。两部分会合并训练，AI 不会覆盖人工内容。",
             "en": "When both sources are enabled: AI generates foundational knowledge, general language/code patterns and basic tasks; your manual corpus contains the specific material you want Orbit to learn. Both are merged into one run, and AI does not replace your manual content.",
+        })
+        advice.append({
+            "severity": "info", "code": "research_recipe",
+            "zh": "研究型建议：预训练应按 token 总量规划，而不是只重复少量样本；先做去重、语言/质量过滤、代码和文献混合，再保留验证集。微调从较低学习率和约 1～3 个数据遍历开始，验证集变好再增加步数，避免小数据过拟合。",
+            "en": "Research-informed recipe: plan pretraining by total tokens instead of repeatedly cycling a tiny sample set; deduplicate and quality-filter before mixing documents and code, and keep a held-out validation set. For fine-tuning, start with a lower learning rate and roughly 1–3 dataset passes, then add steps only when held-out validation improves.",
         })
         if requested_mode == "fine_tuning":
             mode_title = {"zh": "微调（专业文献 + 约 50% 对话）", "en": "Fine-tuning (specialized documents + about 50% dialogue)"}
@@ -549,6 +573,8 @@ class OrbitRuntime:
             "mode_title": mode_title,
             "base_model": base_model or None,
             "base_model_source": base_source,
+            "base_model_preset": parent_preset,
+            "model_scale_locked": bool(requested_mode == "fine_tuning" and parent_preset in PRESETS),
             "training_round": training_round,
             "corpus_policy": self._corpus_policy(requested_mode),
             "optimization_goal": optimization_goal,

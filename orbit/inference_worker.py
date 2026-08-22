@@ -89,7 +89,12 @@ def main() -> None:
                     # even for the larger architectural vocabulary.
                     vocab_limit=256,
                 )
-                generated = bytes(result[0, ids.shape[1] :].tolist()).decode("utf-8", errors="replace")
+                # A legacy checkpoint may still expose a wider output head.
+                # The active Orbit pipeline is byte-level, so never let an
+                # out-of-range legacy token crash the API/UI. Clamp it to the
+                # byte vocabulary and mark invalid UTF-8 as replacement text.
+                generated_ids = [max(0, min(255, int(value))) for value in result[0, ids.shape[1] :].tolist()]
+                generated = bytes(generated_ids).decode("utf-8", errors="replace")
                 send({"type": "result", "content": generated})
             except Exception as exc:
                 send({"type": "error", "error": str(exc)})

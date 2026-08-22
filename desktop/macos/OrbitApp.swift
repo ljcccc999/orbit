@@ -215,6 +215,12 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
         webView = OrbitWebView(frame: container.bounds, configuration: webConfiguration)
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
+        // Keep the native web view transparent so the loaded Orbit surface is
+        // visible immediately instead of being covered by WebKit's default
+        // opaque white backing during a delayed first paint.
+        webView.setValue(false, forKey: "drawsBackground")
+        webView.wantsLayer = true
+        webView.layer?.backgroundColor = NSColor.clear.cgColor
         webView.isHidden = true
         container.addSubview(webView)
 
