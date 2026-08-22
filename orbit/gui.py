@@ -217,7 +217,7 @@ class OrbitApp:
             self._append(self.chat_output, "Orbit：请先加载训练好的 checkpoint。\n\n")
             return
         ids = torch.tensor([list(prompt.encode("utf-8"))], dtype=torch.long)
-        result = self.model.generate(ids, max_new_tokens=64, temperature=0.8)
+        result = self.model.generate(ids, max_new_tokens=64, temperature=0.8, vocab_limit=256)
         answer = bytes(result[0].tolist()).decode("utf-8", errors="replace")
         self._append(self.chat_output, f"Orbit：{answer[len(prompt):]}\n\n")
 

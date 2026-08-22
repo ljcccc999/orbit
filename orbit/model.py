@@ -226,11 +226,20 @@ class OrbitForCausalLM(nn.Module):
         return result
 
     @torch.no_grad()
-    def generate(self, input_ids: Tensor, max_new_tokens: int = 64, temperature: float = 0.8) -> Tensor:
+    def generate(
+        self,
+        input_ids: Tensor,
+        max_new_tokens: int = 64,
+        temperature: float = 0.8,
+        vocab_limit: Optional[int] = None,
+    ) -> Tensor:
         self.eval()
+        limit = self.cfg.vocab_size if vocab_limit is None else min(int(vocab_limit), self.cfg.vocab_size)
+        if limit < 1:
+            raise ValueError("vocab_limit must be positive")
         for _ in range(max_new_tokens):
             context = input_ids[:, -self.cfg.max_seq_len :]
-            logits = self(context)["logits"][:, -1]
+            logits = self(context)["logits"][:, -1, :limit]
             if temperature <= 0:
                 next_token = logits.argmax(-1, keepdim=True)
             else:

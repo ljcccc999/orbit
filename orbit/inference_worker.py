@@ -103,6 +103,9 @@ def main() -> None:
                 result = model.generate(
                     ids, max_new_tokens=int(request.get("max_tokens", 128)),
                     temperature=float(request.get("temperature", 0.8)),
+                    # Orbit's current training pipeline encodes UTF-8 bytes,
+                    # even for the larger architectural vocabulary.
+                    vocab_limit=256,
                 )
                 generated = bytes(result[0, ids.shape[1] :].tolist()).decode("utf-8", errors="replace")
                 send({"type": "result", "content": generated})
