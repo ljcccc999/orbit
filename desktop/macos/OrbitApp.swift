@@ -128,6 +128,7 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    @MainActor
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showWindow()
         return true
@@ -260,6 +261,7 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
         window.makeKeyAndOrderFront(nil)
     }
 
+    @MainActor
     private func showWindow() {
         NSApp.setActivationPolicy(.regular)
         window.makeKeyAndOrderFront(nil)
