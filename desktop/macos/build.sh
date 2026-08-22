@@ -35,5 +35,6 @@ rm -rf "$ICONSET"
 codesign --force --deep --sign "${ORBIT_CODESIGN_IDENTITY:--}" "$APP"
 # Do not carry Finder/resource-fork metadata into the distributable archive;
 # it can make codesign reject the nested status-bar helper after extraction.
+rm -f "$OUTPUT/Orbit-macOS-universal.zip"
 ditto -c -k --norsrc --keepParent "$APP" "$OUTPUT/Orbit-macOS-universal.zip"
 printf '%s\n' "$OUTPUT/Orbit-macOS-universal.zip"

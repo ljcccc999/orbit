@@ -20,7 +20,49 @@ def test_training_page_preserves_a_manually_entered_sample_count():
     assert 'max="50000"' in PAGE
     assert "manualSampleEdit=true" in PAGE
     assert "if(!manualSampleEdit)$('teacherExamples').value=r.recommended_examples" in PAGE
+    assert "use_recommended_examples:!manualSampleEdit" in PAGE
+    assert "步 · 序列" in PAGE
+    assert "个样本" in PAGE
     assert "viewGeneratedContent" in PAGE
+
+
+def test_reset_form_balanced_recommendation_is_coupled_to_recommended_samples(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    recommendation = runtime.training_recommendation({
+        "preset": "300m",
+        "device": "auto",
+        "examples": 20,
+        "training_mode": "pretraining",
+        "training_round": 1,
+        "optimization_goal": "balanced",
+        "use_recommended_examples": True,
+    })
+    assert recommendation["optimization_goal"] == "balanced"
+    assert recommendation["recommended_examples"] == 2000
+    assert recommendation["config"]["steps"] == 2000
+
+    fast = runtime.training_recommendation({
+        "preset": "300m",
+        "device": "auto",
+        "examples": 20,
+        "training_mode": "pretraining",
+        "training_round": 1,
+        "optimization_goal": "fast",
+        "use_recommended_examples": True,
+    })
+    memory = runtime.training_recommendation({
+        "preset": "300m",
+        "device": "auto",
+        "examples": 20,
+        "training_mode": "pretraining",
+        "training_round": 1,
+        "optimization_goal": "memory",
+        "use_recommended_examples": True,
+    })
+    assert fast["estimated_training_seconds"] < memory["estimated_training_seconds"]
+    assert fast["config"]["steps"] == 800
+    assert "applyOptimizationRecommendation" in PAGE
+    assert "$('optimizationGoal')?.addEventListener('change',()=>{manualConfigEdit=false;scheduleRecommendation()})" in PAGE
 
 
 def _write_tiny_checkpoint(runtime: OrbitRuntime, model_id: str = "orbit-test") -> None:

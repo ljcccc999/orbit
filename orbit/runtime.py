@@ -429,17 +429,29 @@ class OrbitRuntime:
         local_mps = device == "mps" or (device == "auto" and sys.platform == "darwin")
         if local_mps:
             seq_len = min(seq_len, 512)
-        data_units = examples if bool(payload.get("assisted")) else max(1, text_chars // max(256, seq_len))
         scale_examples = {"300m": 2_000, "1b": 5_000, "3b": 10_000, "7b": 20_000, "14b": 30_000, "38b": 50_000}[preset]
         goal_chars = max(0, min(20_000, int(payload.get("goal_chars", 0))))
         recommended_examples = min(50_000, scale_examples + min(10_000, goal_chars // 100))
+        # A freshly reset form has not been edited by the user yet. In that
+        # state the sample count and the advanced parameters must be one
+        # coherent recommendation: do not calculate 100 steps from the
+        # temporary 20-sample placeholder and then replace only the sample
+        # field with 2,000. Once the user edits the sample count, the browser
+        # sends use_recommended_examples=false and their exact value wins.
+        use_recommended_examples = bool(payload.get("use_recommended_examples", False))
+        if use_recommended_examples:
+            data_units = recommended_examples
+        elif bool(payload.get("assisted")):
+            data_units = examples
+        else:
+            data_units = max(1, text_chars // max(256, seq_len))
         steps = max(100, min(2000, data_units * (20 if bool(payload.get("assisted")) else 8)))
         optimization_goal = str(payload.get("optimization_goal", "balanced")).strip().lower() or "balanced"
         if optimization_goal not in {"fast", "memory", "quality", "balanced"}:
             raise ValueError("训练优化目标必须是省时间、省内存、效果优先或平衡")
         if optimization_goal == "fast":
-            seq_len = min(seq_len, 384)
-            steps = max(50, min(2000, round(steps * 0.65)))
+            seq_len = min(seq_len, 256)
+            steps = max(50, min(2000, round(steps * 0.4)))
             recommended_examples = min(50_000, max(50, round(recommended_examples * 0.7)))
         elif optimization_goal == "memory":
             seq_len = min(seq_len, 256)
