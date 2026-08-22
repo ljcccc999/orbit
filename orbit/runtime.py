@@ -1403,11 +1403,31 @@ class OrbitRuntime:
                 self._training.update(step=current, steps=total, message=f"正在生成训练语料：{current}/{total}")
 
         def worker() -> None:
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            partial_dataset = self.datasets_root / f"teacher-{stamp}.partial.txt"
+            partial_tmp = partial_dataset.with_suffix(".tmp")
+            partial_tmp.write_text(ORBIT_TRAINING_ANCHOR + "\n\n", encoding="utf-8")
+            os.replace(partial_tmp, partial_dataset)
+
+            def save_generated_chunk(chunk: str, current: int, total: int) -> None:
+                # Append each completed provider response immediately. A
+                # later 402/timeout/restart must leave the completed corpus
+                # available for inspection and resume.
+                with partial_dataset.open("a", encoding="utf-8") as handle:
+                    handle.write(chunk.strip() + "\n\n")
+                with self._state_lock:
+                    self._training.update(
+                        generated_content_available=True,
+                        generated_content_path=str(partial_dataset),
+                        generated_content_bytes=partial_dataset.stat().st_size,
+                        dataset=str(partial_dataset),
+                        message=f"正在生成训练语料：{current}/{total}（已保存）",
+                    )
+
             try:
-                text, usage = generate_dataset(teacher, api_key, self._stop_event, generated)
+                text, usage = generate_dataset(teacher, api_key, self._stop_event, generated, save_generated_chunk)
                 if self._stop_event.is_set():
                     raise InterruptedError("自动训练已停止")
-                stamp = time.strftime("%Y%m%d-%H%M%S")
                 dataset = self.datasets_root / f"teacher-{stamp}.txt"
                 temporary = dataset.with_suffix(".tmp")
                 temporary.write_text(text, encoding="utf-8")

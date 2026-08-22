@@ -105,6 +105,7 @@ def generate_dataset(
     api_key: str,
     stop_event: Event,
     callback: Callable[[int, int], None] | None = None,
+    chunk_callback: Callable[[str, int, int], None] | None = None,
 ) -> tuple[str, dict[str, int]]:
     config.validate()
     if not api_key.strip() or "\n" in api_key or len(api_key) > 1000:
@@ -197,6 +198,8 @@ def generate_dataset(
         for key in usage:
             usage[key] += int(response_usage.get(key, 0) or 0)
         completed += count
+        if chunk_callback:
+            chunk_callback(content, completed, config.examples)
         if callback:
             callback(completed, config.examples)
     # This is a real training corpus prefix, not a runtime answer shortcut. It
