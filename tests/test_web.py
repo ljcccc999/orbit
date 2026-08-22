@@ -193,6 +193,7 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert 'id="actionModal"' in PAGE
     assert "function actionConfirm" in PAGE
     assert 'id="generatedContentPanel"' in PAGE
+    assert 'id="generatedContentPreview" class="code training-content" tabindex="0"' in PAGE
     assert 'id="viewGeneratedContent"' in PAGE
     assert 'id="copyGeneratedContent"' in PAGE
     assert "/api/training/generated-content" in PAGE

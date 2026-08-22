@@ -658,7 +658,7 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     '<div id="trainingStatus" class="status"></div>',
-    '<div id="trainingStatus" class="status"></div><div id="generatedContentPanel" class="generated-content-panel" hidden><div class="actions" style="justify-content:space-between"><b id="generatedContentTitle">AI-generated training content</b><div class="actions"><button class="button" id="viewGeneratedContent">View content</button><button class="button" id="copyGeneratedContent">Copy</button></div></div><div id="generatedContentMeta" class="help"></div><pre id="generatedContentPreview" class="code" hidden></pre></div>',
+    '<div id="trainingStatus" class="status"></div><div id="generatedContentPanel" class="generated-content-panel" hidden><div class="actions" style="justify-content:space-between"><b id="generatedContentTitle">AI-generated training content</b><div class="actions"><button class="button" id="viewGeneratedContent">View content</button><button class="button" id="copyGeneratedContent">Copy</button></div></div><div id="generatedContentMeta" class="help"></div><pre id="generatedContentPreview" class="code training-content" tabindex="0" hidden></pre></div>',
     1,
 )
 PAGE = PAGE.replace(

@@ -197,6 +197,8 @@ Orbit does not upload local training text, checkpoints, or chat messages automat
 
 ## Updates
 
+The AI-generated training-content preview is independently scrollable with a mouse wheel or trackpad, including large teacher-generated corpora.
+
 Open **Settings** and enable **Automatically update Orbit**. Orbit checks the official release channel in the background. If training is active, the update is queued and waits for the current checkpoint to be saved before restarting the local service. Releases can be applied directly from an older updater-capable version to the latest release; intermediate versions are not required.
 
 The original 0.5.0 runtime predates the updater. It needs one manual installation of a newer Orbit version before in-app updates can take over.
