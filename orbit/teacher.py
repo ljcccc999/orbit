@@ -42,8 +42,8 @@ class TeacherConfig:
             raise ValueError("请填写有效的教师模型名称")
         if not self.instruction.strip() or len(self.instruction) > 20_000:
             raise ValueError("请填写不超过 20,000 字的训练目标")
-        if not 1 <= self.examples <= 100:
-            raise ValueError("自动生成样本数必须在 1 到 100 之间")
+        if not 1 <= self.examples <= 5_000:
+            raise ValueError("自动生成样本数必须在 1 到 5,000 之间")
         if self.corpus_mode not in {"document", "mixed", "pretraining", "fine_tuning"}:
             raise ValueError("训练语料模式必须是 document、pretraining 或 fine_tuning")
         if not 1 <= int(self.training_round) <= 1000:

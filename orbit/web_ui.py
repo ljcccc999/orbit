@@ -338,6 +338,19 @@ PAGE = PAGE.replace(
     ".model-name-status.error{color:var(--red);font-weight:650}.model-name-status.ok{color:var(--green)}html,body{user-select:none;-webkit-user-select:none;-webkit-app-region:drag}.app,.workspace,.content,.panel,.panel-head,.brand{-webkit-app-region:drag}.button,input,select,textarea,summary,a,[contenteditable=true],.nav,.toolbar-right,.composer,.messages,.run-list,.run-detail,.training-content,.modal-backdrop,.modal-card{user-select:text;-webkit-user-select:text;-webkit-app-region:no-drag}p,h1,h2,h3,h4,label,span,b,small{user-select:none;-webkit-user-select:none}</style>",
     1,
 )
+
+# Include the linked manual-text recommendation in each optimization choice.
+PAGE = PAGE.replace(
+    "${r.recommended_examples||'—'} samples`;option.title=zh?",
+    "${r.recommended_examples||'—'} samples · ${r.recommended_manual_chars?.toLocaleString()||'—'} chars`;option.title=zh?",
+)
+
+# Keep the teacher sample control aligned with the backend's larger corpus
+# limit.  Hundreds to thousands of samples are useful for pretraining; the
+# actual recommendation remains model-size and objective dependent.
+PAGE = PAGE.replace('id="teacherExamples" type="number" value="20" min="1" max="100"', 'id="teacherExamples" type="number" value="20" min="1" max="5000"')
+PAGE = PAGE.replace('20 is a balanced start.', 'Orbit recommends hundreds to thousands for pretraining and caps this field at 5,000.')
+PAGE = PAGE.replace('20 个适合作为起点。', '预训练建议使用数百到数千个，当前上限为 5,000 个。')
 PAGE = PAGE.replace(
     "function renderSampleEstimate(r){",
     "function syncCorpusPlan(){const plan=$('corpusPlan');if(!plan||plan.dataset.edited==='1')return;plan.value=$('trainingMode')?.value==='fine_tuning'?'专业文献/技术资料约25%；分类、情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮输入→输出任务约25%；高质量用户/助手对话约50%；最后加入少量 Orbit 身份样本。':'多篇文献、教材、技术文档、事实材料、代码和代码注释约80%；分类/情感分析、NER、代码/SQL生成、摘要总结、文本扩写/润色等单轮任务约10%；少量用户/助手对话和 Orbit 身份样本约10%。预训练第 1～N 次都保持文献为主。'}function renderSampleEstimate(r){",
@@ -495,7 +508,7 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     "async function recommendTraining(){",
-    "function renderSampleEstimate(r){const box=document.getElementById('manualSampleEstimate');if(!box)return;const e=r?.training_advice?.dataset_estimate||{},seq=Number(e.sequence_samples||0),bytes=Number(e.text_bytes||0),teacher=Number(r?.training_advice?.requested?.examples||0);if(seq){box.textContent=currentLang==='zh'?`人工文献估算样本数：约 ${seq.toLocaleString()} 个序列片段（原文 ${(bytes/1048576).toFixed(2)} MB）；实际训练使用随机窗口。`:`Estimated manual-corpus samples: about ${seq.toLocaleString()} sequence chunks (${(bytes/1048576).toFixed(2)} MB); training uses random windows.`}else{box.textContent=currentLang==='zh'?(teacher?`人工文献样本数：尚未输入；AI 辅助将生成 ${teacher} 个教师样本。`:'人工文献样本数：输入或导入文献后自动估算。'):(teacher?`Manual-corpus samples: none entered yet; AI assistance will generate ${teacher} teacher samples.`:'Manual-corpus samples: enter or import literature to estimate them automatically.')}}function renderTrainingAdvice(r){const box=document.getElementById('trainingAdvice'),a=r?.training_advice;if(!box||!a)return;const zh=currentLang==='zh',title=a.mode_title?.[zh?'zh':'en']||'',items=a.items||[];box.innerHTML=`<b>${zh?'训练方式：':'Training mode: '}${esc(title)}</b>${items.map(x=>`<div style=\"margin-top:7px;color:${x.severity==='warning'?'var(--red)':'var(--muted)'}\">${x.severity==='warning'?'⚠️':'ℹ️'} ${esc(x[zh?'zh':'en'])}</div>`).join('')}`}async function recommendTraining(){",
+    "function renderSampleEstimate(r){const box=document.getElementById('manualSampleEstimate');if(!box)return;const e=r?.training_advice?.dataset_estimate||{},seq=Number(e.sequence_samples||0),bytes=Number(e.text_bytes||0),teacher=Number(r?.training_advice?.requested?.examples||0),recommendedChars=Number(r?.recommended_manual_chars||0),recommendedWords=Number(r?.recommended_manual_words||0);const recommendation=currentLang==='zh'?(recommendedChars?`当前推荐：人工文献约 ${recommendedChars.toLocaleString()} 字符（约 ${recommendedWords.toLocaleString()} 词，中文按字符准备） + AI 辅助 ${teacher.toLocaleString()} 个样本；两者会合并训练。`:`AI 辅助将生成 ${teacher.toLocaleString()} 个样本；人工文献输入后按字数估算。`):(recommendedChars?`Recommended: ${recommendedChars.toLocaleString()} manual-corpus characters (about ${recommendedWords.toLocaleString()} words) + ${teacher.toLocaleString()} AI-assisted samples; both are trained together.`:`AI assistance will generate ${teacher.toLocaleString()} samples; manual corpus samples are estimated from text length.`);if(seq){box.textContent=currentLang==='zh'?`人工文献估算样本数：约 ${seq.toLocaleString()} 个序列片段（原文 ${(bytes/1048576).toFixed(2)} MB）。${recommendation}`:`Estimated manual-corpus samples: about ${seq.toLocaleString()} sequence chunks (${(bytes/1048576).toFixed(2)} MB). ${recommendation}`}else{box.textContent=(currentLang==='zh'?'人工文献样本数：输入或导入文献后按字数估算。':'Manual-corpus samples are estimated from the text length.')+' '+recommendation}}function renderTrainingAdvice(r){const box=document.getElementById('trainingAdvice'),a=r?.training_advice;if(!box||!a)return;const zh=currentLang==='zh',title=a.mode_title?.[zh?'zh':'en']||'',items=a.items||[];box.innerHTML=`<b>${zh?'训练方式：':'Training mode: '}${esc(title)}</b>${items.map(x=>`<div style=\"margin-top:7px;color:${x.severity==='warning'?'var(--red)':'var(--muted)'}\">${x.severity==='warning'?'⚠️':'ℹ️'} ${esc(x[zh?'zh':'en'])}</div>`).join('')}`}async function recommendTraining(){",
  )
 PAGE = PAGE.replace(
     "examples:+$('teacherExamples').value||20,text_chars:$('corpus').value.length,goal_chars:$('teacherInstruction').value.length,assisted:",

@@ -367,7 +367,7 @@ class OrbitRuntime:
         device = str(payload.get("device", "auto")).lower()
         if device not in {"auto", "mps", "cuda", "cpu"}:
             raise ValueError("不支持的训练设备")
-        examples = max(1, min(100, int(payload.get("examples", 20))))
+        examples = max(1, min(5_000, int(payload.get("examples", 20))))
         text_chars = max(0, min(100_000_000, int(payload.get("text_chars", 0))))
         model = OrbitConfig.for_preset(preset)
         base = TrainingConfig.for_model(preset)
@@ -391,9 +391,9 @@ class OrbitRuntime:
         if local_mps:
             seq_len = min(seq_len, 512)
         data_units = examples if bool(payload.get("assisted")) else max(1, text_chars // max(256, seq_len))
-        scale_examples = {"300m": 20, "1b": 36, "3b": 56, "7b": 72, "14b": 88, "38b": 100}[preset]
+        scale_examples = {"300m": 500, "1b": 1_000, "3b": 1_500, "7b": 2_500, "14b": 3_500, "38b": 5_000}[preset]
         goal_chars = max(0, min(20_000, int(payload.get("goal_chars", 0))))
-        recommended_examples = min(100, scale_examples + min(20, goal_chars // 250))
+        recommended_examples = min(5_000, scale_examples + min(500, goal_chars // 250))
         steps = max(100, min(2000, data_units * (20 if bool(payload.get("assisted")) else 8)))
         optimization_goal = str(payload.get("optimization_goal", "balanced")).strip().lower() or "balanced"
         if optimization_goal not in {"fast", "memory", "quality", "balanced"}:
@@ -401,15 +401,15 @@ class OrbitRuntime:
         if optimization_goal == "fast":
             seq_len = min(seq_len, 384)
             steps = max(50, min(2000, round(steps * 0.65)))
-            recommended_examples = min(100, max(10, round(recommended_examples * 0.7)))
+            recommended_examples = min(5_000, max(50, round(recommended_examples * 0.7)))
         elif optimization_goal == "memory":
             seq_len = min(seq_len, 256)
             steps = max(50, min(2000, round(steps * 0.8)))
-            recommended_examples = min(100, max(10, round(recommended_examples * 0.8)))
+            recommended_examples = min(5_000, max(50, round(recommended_examples * 0.8)))
         elif optimization_goal == "quality":
             seq_len = max(seq_len, min(base.seq_len, 1024))
             steps = max(100, min(2000, round(steps * 1.5)))
-            recommended_examples = min(100, max(recommended_examples, round(recommended_examples * 1.25)))
+            recommended_examples = min(5_000, max(recommended_examples, round(recommended_examples * 1.25)))
         warmup = max(10, min(200, steps // 10))
         checkpoint_every = max(25, min(250, steps // 5))
         config = base.with_overrides(
@@ -427,6 +427,12 @@ class OrbitRuntime:
             config = config.with_overrides(batch_size=1, grad_accum=1, checkpoint_every=max(steps, 1000))
         elif optimization_goal == "quality":
             config = config.with_overrides(steps=min(2000, max(config.steps, round(config.steps * 1.2))))
+        # Manual literature is measured in UTF-8 characters, while AI
+        # assistance is measured in generated examples. Keep both linked to
+        # the selected optimization target so the UI can recommend them
+        # together. This is deliberately conservative for mixed-language text.
+        recommended_manual_chars = recommended_examples * 600
+        recommended_manual_words = max(1, round(recommended_manual_chars / 1.6))
         base_model = str(payload.get("base_model", "")).strip()
         requested_mode = str(payload.get("training_mode", "")).strip().lower()
         base_source = str(payload.get("base_model_source", "local")).strip().lower() or "local"
@@ -444,7 +450,7 @@ class OrbitRuntime:
         requested_batch = max(1, int(payload.get("batch_size", 0) or config.batch_size))
         requested_accum = max(1, int(payload.get("grad_accum", 0) or config.grad_accum))
         requested_seq = max(8, int(payload.get("seq_len", 0) or config.seq_len))
-        requested_examples = max(1, min(100, int(payload.get("examples", 20))))
+        requested_examples = max(1, min(5_000, int(payload.get("examples", 20))))
         text_bytes = max(0, min(500_000_000, int(payload.get("text_bytes", 0) or 0)))
         estimated_sequences = text_bytes // max(1, requested_seq + 1) if text_bytes else 0
         effective_batch = requested_batch * requested_accum
@@ -578,6 +584,9 @@ class OrbitRuntime:
             "required_memory_gb": round(required, 1),
             "available_memory_gb": round(available, 1),
             "recommended_examples": recommended_examples,
+            "recommended_manual_chars": recommended_manual_chars,
+            "recommended_manual_words": recommended_manual_words,
+            "recommended_manual_text": f"约 {recommended_manual_chars:,} 个字符（约 {recommended_manual_words:,} 个词；中文可按字符数准备）",
             "config": config.__dict__,
             "estimated_step_seconds": round(estimated_step_seconds),
             "estimated_training_seconds": estimated_training_seconds,
@@ -1109,7 +1118,7 @@ class OrbitRuntime:
             "completed_at": None, "model_id": model_id, "model_name": display_name,
             "preset": preset, "parameters": cfg.estimate_parameters(), "parent_model": parent_model,
             "assisted": bool(payload.get("_assisted")), "training_goal": str(payload.get("instruction", "")),
-            "generated_content_path": str(dataset) if payload.get("_assisted") else "",
+            "generated_content_path": str(payload.get("_generated_dataset_path") or dataset) if payload.get("_assisted") else "",
             "training_mode": training_mode,
             "training_round": training_round,
             "base_model_source": str(payload.get("base_model_source", "local")),
@@ -1338,6 +1347,18 @@ class OrbitRuntime:
                 temporary = dataset.with_suffix(".tmp")
                 temporary.write_text(text, encoding="utf-8")
                 os.replace(temporary, dataset)
+                # Manual corpus and teacher corpus are additive. Keep the
+                # teacher-only file for preview, and train on one combined
+                # corpus when the user supplied both kinds of content.
+                manual_text = str(payload.get("text", "")).strip()
+                combined_text = (
+                    f"{manual_text}\n\n--- ORBIT AI-ASSISTED CORPUS ---\n\n{text}"
+                    if manual_text else text
+                )
+                combined_dataset = self.datasets_root / f"training-input-{stamp}.txt"
+                combined_tmp = combined_dataset.with_suffix(".tmp")
+                combined_tmp.write_text(combined_text, encoding="utf-8")
+                os.replace(combined_tmp, combined_dataset)
                 with self._state_lock:
                     self._training.update(
                         status="waiting_memory", message="样本已保存，正在等待足够的安全训练内存",
@@ -1345,7 +1366,8 @@ class OrbitRuntime:
                         generated_content_available=True, generated_content_path=str(dataset),
                         generated_content_bytes=len(text.encode("utf-8")),
                     )
-                payload["_dataset_path"] = str(dataset)
+                payload["_dataset_path"] = str(combined_dataset)
+                payload["_generated_dataset_path"] = str(dataset)
                 payload["_assisted"] = True
                 preset = str(payload.get("preset", "300m")).lower()
                 required = OrbitConfig.for_preset(preset).estimated_training_memory_gb()

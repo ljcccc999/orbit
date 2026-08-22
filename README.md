@@ -99,6 +99,7 @@ Open the **Training** page, choose a preset, optionally name the model or select
 
 - **Pretraining (from scratch)** starts with random Orbit weights. **Fine-tuning** can continue an already-trained local Orbit checkpoint or a downloaded, validated Orbit-compatible checkpoint; the Training page separates local and download sources and preserves the parent lineage. Orbit never silently changes one mode into the other.
 - Manual documents are shown with an estimated sample count based on UTF-8 corpus size and sequence length. The page warns about small datasets, overfitting, excessive context, unsafe memory pressure, and unrealistic pretraining goals, then suggests safer settings.
+- The four optimization choices also recommend AI-assisted sample counts and manual corpus size together. AI assistance accepts 1–5,000 samples; manual text and AI-generated text can be merged in one run, while the teacher corpus remains separately viewable. See `docs/300M-38B-全模型规模参数推荐.md`.
 
 The page also shows separate writing guidance: pretraining rounds 1–N should be document- and code-first with only a small dialogue/identity tail; fine-tuning should use specialized documents, single-turn labeled tasks, and about 50% high-quality instruction dialogue. Structured tasks include classification/sentiment, NER, code/SQL generation, summarization, and expansion/polishing; they are input→output examples, not chat bubbles. External or downloaded models cannot be trained from random initialization and are restricted to fine-tuning.
 
