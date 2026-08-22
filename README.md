@@ -23,6 +23,7 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Keeps a native menu-bar or system-tray controller running when its window is closed; only **Quit Orbit** stops the local service.
 - Loads weights on demand and automatically unloads an idle model after five minutes.
 - Can use DeepSeek or another OpenAI-compatible API to generate a parameter-aware supervised dataset and then start local training. Each provider keeps its own local model, URL, and API key; replacing one key does not affect another provider.
+- Shows the complete teacher-generated corpus in the Training page before or during local training, with a scrollable preview and copy action; the same corpus remains inspectable in Training History.
 - Supports Chinese, English, or balanced bilingual training data.
 - Creates portable community contribution packages for shared models. Contributions are quarantined or held for review and cannot enter a dataset until a local human reviewer approves them.
 - Automatically tunes advanced parameters for the selected model size, device, available memory, and amount of local or teacher-generated data. Unsafe local configurations are blocked before allocation and the UI recommends a remote GPU bundle.

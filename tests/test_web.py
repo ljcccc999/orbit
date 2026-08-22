@@ -77,6 +77,31 @@ def test_stopped_training_can_delete_model_and_keep_history(tmp_path):
     assert runtime.training_run(run_id)["status"] == "stopped_deleted"
 
 
+def test_teacher_generated_content_is_available_only_from_orbit_dataset_dir(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    dataset = runtime.datasets_root / "teacher-preview.txt"
+    dataset.write_text("文献样本\n\n输入：查询年龄大于18岁的用户\n输出：SELECT * FROM users WHERE age > 18", encoding="utf-8")
+    with runtime._state_lock:
+        runtime._training.update(
+            status="waiting_memory", assisted=True,
+            generated_content_available=True,
+            generated_content_path=str(dataset),
+            generated_content_bytes=dataset.stat().st_size,
+        )
+
+    result = runtime.generated_training_content()
+
+    assert result["available"] is True
+    assert "SELECT * FROM users" in result["content"]
+    assert result["assisted"] is True
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("must not be exposed", encoding="utf-8")
+    with runtime._state_lock:
+        runtime._training["generated_content_path"] = str(outside)
+    assert runtime.generated_training_content()["available"] is False
+
+
 def test_identity_cannot_be_overwritten_by_prompt_or_old_metadata(tmp_path):
     runtime = OrbitRuntime(tmp_path)
     (runtime.models_root / "legacy.json").write_text(json.dumps({
@@ -113,6 +138,11 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "/api/conversations/archive" in PAGE
     assert 'id="actionModal"' in PAGE
     assert "function actionConfirm" in PAGE
+    assert 'id="generatedContentPanel"' in PAGE
+    assert 'id="viewGeneratedContent"' in PAGE
+    assert 'id="copyGeneratedContent"' in PAGE
+    assert "/api/training/generated-content" in PAGE
+    assert "AI-generated content" in PAGE
     assert "function actionPrompt" in PAGE
     assert "PAGE = PAGE.replace" not in PAGE
     assert 'id="memoryInput"' in PAGE

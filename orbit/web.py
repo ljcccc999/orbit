@@ -172,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
                 })
             elif path == "/api/training":
                 self._json(200, self.server.runtime.training_state())
+            elif path == "/api/training/generated-content":
+                self._json(200, self.server.runtime.generated_training_content())
             elif path == "/api/training/runs":
                 self._json(200, self.server.runtime.list_training_runs())
             elif path.startswith("/api/training/runs/"):

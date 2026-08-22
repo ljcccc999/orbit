@@ -82,6 +82,8 @@ class OrbitRuntime:
         self._training: dict[str, Any] = {
             "status": "idle", "step": 0, "steps": 0, "loss": None,
             "message": "尚未开始训练", "model_id": None,
+            "assisted": False, "generated_content_available": False,
+            "generated_content_path": "", "generated_content_bytes": 0,
         }
         self._restore_training_state()
         self._loading: dict[str, Any] = {
@@ -618,6 +620,40 @@ class OrbitRuntime:
         state["eta_seconds"] = round(elapsed / step * (steps - step)) if started and step > 0 and steps > step else None
         return state
 
+    def generated_training_content(self) -> dict[str, Any]:
+        """Return the current teacher-generated corpus for the local UI.
+
+        The full corpus is deliberately kept out of ``/api/training`` and
+        ``/api/system`` polling responses.  This endpoint is local-only like
+        the rest of the UI and only reads a file owned by Orbit's datasets
+        directory, so a user can inspect/copy the exact material before or
+        while the isolated worker trains on it.
+        """
+        with self._state_lock:
+            state = dict(self._training)
+        if not state.get("assisted") and not state.get("generated_content_available"):
+            return {"available": False, "content": "", "bytes": 0}
+        raw_path = str(state.get("generated_content_path") or state.get("dataset") or "").strip()
+        if not raw_path:
+            return {"available": False, "content": "", "bytes": 0}
+        candidate = Path(raw_path)
+        try:
+            if candidate.resolve().parent != self.datasets_root.resolve() or not candidate.is_file():
+                return {"available": False, "content": "", "bytes": 0}
+            content = candidate.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return {"available": False, "content": "", "bytes": 0}
+        return {
+            "available": bool(content),
+            "content": content,
+            "bytes": len(content.encode("utf-8")),
+            "assisted": True,
+            "model_id": state.get("model_id"),
+            "run_id": state.get("run_id"),
+            "training_mode": state.get("training_mode"),
+            "training_round": state.get("training_round"),
+        }
+
     def loading_state(self) -> dict[str, Any]:
         with self._state_lock:
             return dict(self._loading)
@@ -1073,6 +1109,7 @@ class OrbitRuntime:
             "completed_at": None, "model_id": model_id, "model_name": display_name,
             "preset": preset, "parameters": cfg.estimate_parameters(), "parent_model": parent_model,
             "assisted": bool(payload.get("_assisted")), "training_goal": str(payload.get("instruction", "")),
+            "generated_content_path": str(dataset) if payload.get("_assisted") else "",
             "training_mode": training_mode,
             "training_round": training_round,
             "base_model_source": str(payload.get("base_model_source", "local")),
@@ -1302,7 +1339,12 @@ class OrbitRuntime:
                 temporary.write_text(text, encoding="utf-8")
                 os.replace(temporary, dataset)
                 with self._state_lock:
-                    self._training.update(status="waiting_memory", message="样本已保存，正在等待足够的安全训练内存", usage=usage, dataset=str(dataset))
+                    self._training.update(
+                        status="waiting_memory", message="样本已保存，正在等待足够的安全训练内存",
+                        usage=usage, dataset=str(dataset), assisted=True,
+                        generated_content_available=True, generated_content_path=str(dataset),
+                        generated_content_bytes=len(text.encode("utf-8")),
+                    )
                 payload["_dataset_path"] = str(dataset)
                 payload["_assisted"] = True
                 preset = str(payload.get("preset", "300m")).lower()
@@ -1337,6 +1379,8 @@ class OrbitRuntime:
                         status="stopped_deleted" if delete_after_stop else "stopped",
                         message=("训练已停止，样本和未完成模型已删除" if delete_after_stop else str(exc)),
                         dataset="" if delete_after_stop else self._training.get("dataset", ""),
+                        generated_content_available=False if delete_after_stop else self._training.get("generated_content_available", False),
+                        generated_content_path="" if delete_after_stop else self._training.get("generated_content_path", ""),
                     )
             except Exception as exc:
                 with self._state_lock:
@@ -1353,6 +1397,8 @@ class OrbitRuntime:
                         status="stopped_deleted" if delete_after_stop else "failed",
                         message=("训练已停止，样本和未完成模型已删除" if delete_after_stop else str(exc)),
                         dataset="" if delete_after_stop else self._training.get("dataset", ""),
+                        generated_content_available=False if delete_after_stop else self._training.get("generated_content_available", False),
+                        generated_content_path="" if delete_after_stop else self._training.get("generated_content_path", ""),
                     )
 
         self._work_thread = threading.Thread(target=worker, name="orbit-auto-training", daemon=True)
@@ -1687,7 +1733,8 @@ class OrbitRuntime:
             self._training.update(
                 status="stopped_deleted",
                 message="训练已停止，样本和未完成模型已删除",
-                checkpoint="", dataset="",
+                checkpoint="", dataset="", generated_content_available=False,
+                generated_content_path="", generated_content_bytes=0,
             )
         return {
             "status": "stopped_deleted",
