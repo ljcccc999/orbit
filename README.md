@@ -95,6 +95,9 @@ These are conservative full-training estimates that include optimizer state and 
 
 Open the **Training** page, choose a preset, optionally name the model or select a parent checkpoint, paste your own text, and choose how to train:
 
+- **Pretraining (from scratch)** starts with random Orbit weights. **Fine-tuning** requires a compatible local Orbit checkpoint and continues that model's lineage; Orbit never silently changes one mode into the other.
+- Manual documents are shown with an estimated sample count based on UTF-8 corpus size and sequence length. The page warns about small datasets, overfitting, excessive context, unsafe memory pressure, and unrealistic pretraining goals, then suggests safer settings.
+
 1. **Train on this computer** starts a local job only after the memory gate passes. The checkpoint stays in `~/.orbit/models`.
 2. **Generate a GPU training package locally** creates a ZIP containing the dataset, configuration, Orbit source, identity rules, and a `run.sh` entry point for a CUDA machine. Human-authored and AI-assisted training use this same package format. You can download it or choose **Generate locally and import to server** after logging in to Orbit Hub.
 3. **Generate data and automatically train** calls DeepSeek or another OpenAI-compatible teacher API, then starts training on this computer. Orbit tells the teacher the selected parameter count, context length, steps, parent model, user goal, and the immutable identity rule that the model is Orbit developed by YUNSH. Every generated dataset also receives real supervised identity examples before training. The sample count controls dataset coverage, generation time, and provider cost. The generated dataset stays local. Each provider's model, URL, and key is saved separately in `~/.orbit/teacher-api.json` with user-only file permissions, so switching back restores that provider and entering a new key replaces only its previous key. Keys are never copied into training history, server uploads, or exports. The goal leaves the computer and the provider may charge for usage, so this path requires explicit confirmation.
@@ -119,7 +122,7 @@ See the bilingual [Community Contribution Policy](COMMUNITY_POLICY.md) for the f
 
 `server/` contains an optional small-server Hub for accounts, administrator review, finished-model uploads, and locally generated GPU training packages. Orbit creates the package on the user's computer and imports it to the configured server with chunking and checksum verification. The Hub stores it for the user's GPU workflow but never executes or loads an uploaded file automatically. See [server/README.md](server/README.md) for deployment and security boundaries.
 
-The 300M–38B choices describe architecture sizes; they are not pretrained model downloads. Training a useful foundation model from scratch requires a large, carefully prepared dataset and substantial compute.
+The 300M–38B choices describe Orbit architecture sizes; they are not pretrained model downloads. External Hugging Face/Qwen checkpoints are not directly compatible with the current byte-level Orbit trainer yet; a real tokenizer, architecture, and weight-format adapter is required before they can be offered as fine-tuning bases. Training a useful foundation model from scratch requires a large, carefully prepared dataset and substantial compute.
 
 ## Chat locally
 
