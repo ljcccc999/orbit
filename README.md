@@ -27,6 +27,7 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Supports Chinese, English, or balanced bilingual training data.
 - Creates portable community contribution packages for shared models. Contributions are quarantined or held for review and cannot enter a dataset until a local human reviewer approves them.
 - Automatically tunes advanced parameters for the selected model size, device, available memory, and amount of local or teacher-generated data. Unsafe local configurations are blocked before allocation and the UI recommends a remote GPU bundle.
+- The optimization selector shows concrete recommendations for balanced, time-saving, memory-saving, and quality-first training, including steps, sequence length, estimated time, peak memory, and sample count.
 - Uses the same locally generated GPU training package for human-authored and AI-assisted training. The package can be downloaded or directly imported into the user's configured Orbit training server.
 - Saves locally trained checkpoints under `~/.orbit/models`.
 - Supports custom model names, secondary training from an existing checkpoint, parent-model lineage, and inspectable content/configuration for every training run.

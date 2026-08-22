@@ -555,6 +555,15 @@ PAGE = PAGE.replace(
     1,
 )
 
+# Put the concrete recommendation results into the existing optimization
+# selector.  Users can compare all four goals before choosing one; selecting
+# a goal still applies only that goal's configuration to the form.
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    """async function refreshOptimizationProfiles(){const select=$('optimizationGoal');if(!select||!system)return;const payload=()=>({preset:$('preset').value,device:$('device').value,examples:+$('teacherExamples').value||20,text_chars:$('corpus').value.length,text_bytes:new TextEncoder().encode($('corpus').value).length,training_mode:$('trainingMode').value,training_round:+$('trainingRound').value||1,base_model_source:$('baseModelSource')?.value||'local',base_model:$('baseModel').value,goal_chars:$('teacherInstruction').value.length,assisted:Boolean($('teacherInstruction').value.trim())});const goals=['balanced','fast','memory','quality'];try{const rows=await Promise.all(goals.map(goal=>request('/api/training/recommendation',{method:'POST',body:JSON.stringify({...payload(),optimization_goal:goal})})));rows.forEach((r,i)=>{const option=[...select.options].find(x=>x.value===goals[i]);if(!option)return;const zh=currentLang==='zh',names=zh?{balanced:'平衡',fast:'1. 省时间',memory:'2. 省内存',quality:'3. 效果优先（不计时间）'}:{balanced:'Balanced',fast:'1. Save time',memory:'2. Save memory',quality:'3. Quality first (ignore time)'};const estimate=r.estimated_training_seconds!=null?formatDuration(r.estimated_training_seconds):'—';option.textContent=`${names[goals[i]]} · ${r.config?.steps||'—'} steps · seq ${r.config?.seq_len||'—'} · ${estimate} · ${r.estimated_peak_memory_gb??'—'}GB · ${r.recommended_examples||'—'} samples`;option.title=zh?`预计 ${estimate}，峰值约 ${r.estimated_peak_memory_gb??'—'}GB，样本 ${r.recommended_examples||'—'} 个`:`Estimated ${estimate}; peak about ${r.estimated_peak_memory_gb??'—'}GB; ${r.recommended_examples||'—'} samples`})}catch{}}const _orbitRecommendWithProfiles=recommendTraining;recommendTraining=async function(){await _orbitRecommendWithProfiles();await refreshOptimizationProfiles()};setTimeout(refreshOptimizationProfiles,300); </script></body></html>""",
+    1,
+)
+
 # Show the exact corpus returned by the teacher model without putting a large
 # document into the normal training-status polling response.  The panel is
 # inserted at the end so it survives the page's earlier compatibility patches.
