@@ -430,10 +430,10 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     "baseModel:'Base model',baseModelHelp:",
-    "trainingMode:'Training method',pretraining:'Pretraining (from scratch)',fineTuning:'Fine-tuning (existing model)',trainingModeHelp:'Pretraining starts with random weights; fine-tuning continues an existing local model.',baseModel:'Base model',baseModelHelp:",
+    "trainingMode:'Training method',pretraining:'Pretraining (from scratch)',fineTuning:'Fine-tuning (existing model)',trainingModeHelp:'Pretraining starts with random weights; fine-tuning continues an existing local model.',baseModel:'Base model',selectBaseModel:'Select a local model to fine-tune',baseModelHelp:",
 ).replace(
     "baseModel:'基础模型',baseModelHelp:",
-    "trainingMode:'训练方式',pretraining:'预训练（从零开始）',fineTuning:'微调（基于已有模型）',trainingModeHelp:'预训练从随机权重开始；微调继续训练已有本地模型。',baseModel:'基础模型',baseModelHelp:",
+    "trainingMode:'训练方式',pretraining:'预训练（从零开始）',fineTuning:'微调（基于已有模型）',trainingModeHelp:'预训练从随机权重开始；微调继续训练已有本地模型。',baseModel:'基础模型',selectBaseModel:'选择要微调的本地模型',baseModelHelp:",
 )
 PAGE = PAGE.replace(
     "function trainPayload(){return{model_name:$('modelName').value,base_model:",
@@ -464,7 +464,7 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     "async function recommendTraining(){",
-    "function syncTrainingMode(trigger=true){const mode=$('trainingMode'),base=$('baseModel');if(!mode||!base)return;if(mode.value==='pretraining'){base.value='';base.disabled=true}else{base.disabled=false}if(trigger)scheduleRecommendation()}async function recommendTraining(){",
+    "function syncTrainingMode(trigger=true){const mode=$('trainingMode'),base=$('baseModel');if(!mode||!base)return;if(mode.value==='pretraining'){base.value='';base.disabled=true}else{base.disabled=false;if(!base.value&&system?.models?.length){base.value=system.models[0].id}if(!base.value&&base.options.length>1){base.value=base.options[1].value}if(!base.value&&base.options.length===1){base.options[0].textContent=t('selectBaseModel')}}if(trigger)scheduleRecommendation()}async function recommendTraining(){",
 )
 PAGE = PAGE.replace(
     "$('startTraining').disabled=!r.feasible;",
