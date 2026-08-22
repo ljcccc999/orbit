@@ -399,6 +399,83 @@ class OrbitRuntime:
             checkpoint_every=checkpoint_every,
             precision="fp32" if local_mps else "auto",
         )
+        base_model = str(payload.get("base_model", "")).strip()
+        requested_mode = str(payload.get("training_mode", "")).strip().lower()
+        if requested_mode not in {"pretraining", "fine_tuning"}:
+            requested_mode = "fine_tuning" if base_model else "pretraining"
+        mode_valid = requested_mode != "fine_tuning" or bool(base_model)
+        requested_steps = max(1, int(payload.get("steps", 0) or config.steps))
+        requested_batch = max(1, int(payload.get("batch_size", 0) or config.batch_size))
+        requested_accum = max(1, int(payload.get("grad_accum", 0) or config.grad_accum))
+        requested_seq = max(8, int(payload.get("seq_len", 0) or config.seq_len))
+        requested_examples = max(1, min(100, int(payload.get("examples", 20))))
+        text_bytes = max(0, min(500_000_000, int(payload.get("text_bytes", 0) or 0)))
+        estimated_sequences = text_bytes // max(1, requested_seq + 1) if text_bytes else 0
+        effective_batch = requested_batch * requested_accum
+        estimated_updates_per_corpus = max(1, (estimated_sequences + effective_batch - 1) // effective_batch) if estimated_sequences else 0
+        advice: list[dict[str, str]] = []
+        if requested_mode == "fine_tuning":
+            mode_title = {"zh": "微调（基于已有模型）", "en": "Fine-tuning (from an existing model)"}
+            if not base_model:
+                advice.append({
+                    "severity": "warning", "code": "finetune_parent_required",
+                    "zh": "你选择了微调，但还没有选择已有模型。请先加载一个本地 checkpoint；否则请选择‘预训练（从零开始）’。",
+                    "en": "Fine-tuning is selected, but no existing model is selected. Choose a local checkpoint, or switch to ‘Pretraining (from scratch)’.",
+                })
+            if requested_examples < 100 and requested_steps >= max(200, requested_examples * 4):
+                advice.append({
+                    "severity": "warning", "code": "finetune_overfit",
+                    "zh": f"当前是微调：{requested_examples} 个样本配 {requested_steps} 步，过拟合风险较高。建议先准备至少 500–1000 条高质量样本，或把步数降到约 60–120 步，再根据验证集增加。",
+                    "en": f"This is fine-tuning: {requested_examples} samples with {requested_steps} steps has a high overfitting risk. Start with 500–1,000 high-quality samples or about 60–120 steps, then increase only if validation improves.",
+                })
+            advice.append({
+                "severity": "info", "code": "finetune_data",
+                "zh": "微调不会重新学习整个世界知识；它主要改变已有模型的行为、格式和领域表达。",
+                "en": "Fine-tuning does not relearn broad world knowledge; it mainly changes behavior, formatting, and domain expression.",
+            })
+        else:
+            mode_title = {"zh": "从零预训练（随机初始化）", "en": "From-scratch pretraining (random initialization)"}
+            if requested_examples < 500 or requested_steps < 1000:
+                advice.append({
+                    "severity": "warning", "code": "pretrain_small",
+                    "zh": f"当前是从零预训练实验，不是微调：{requested_examples} 个 AI 样本和 {requested_steps} 步不足以训练出可靠的通用聊天机器人。建议使用更多样、更大规模的文献语料，并按 token 总量规划训练。",
+                    "en": f"This is a from-scratch pretraining experiment, not fine-tuning: {requested_examples} AI samples and {requested_steps} steps are not enough for a reliable general chatbot. Use a much larger, more diverse corpus and plan by total tokens.",
+                })
+            advice.append({
+                "severity": "info", "code": "pretrain_units",
+                "zh": "‘步数 × batch × 梯度累计’不等于数据集遍历次数；文献会先按序列长度切成 token 片段，真实覆盖率要等语料生成后按 token 统计。",
+                "en": "Steps × batch × gradient accumulation is not the number of dataset passes; documents are packed into token sequences first. True coverage should be measured from token counts after generation.",
+            })
+        if requested_seq >= 2048:
+            advice.append({
+                "severity": "warning", "code": "long_context",
+                "zh": f"序列长度为 {requested_seq}，会明显增加内存和每步时间；如果目标是先验证流程，建议从 512–1024 开始。",
+                "en": f"Sequence length is {requested_seq}, which substantially increases memory and step time. For a first validation run, start around 512–1,024.",
+            })
+        if requested_batch * requested_accum >= 8:
+            advice.append({
+                "severity": "info", "code": "effective_batch",
+                "zh": f"有效批次约为 {requested_batch * requested_accum}；它主要提高梯度稳定性，但会延长每次参数更新所需时间。",
+                "en": f"The effective batch is about {requested_batch * requested_accum}; it mainly stabilizes gradients but lengthens each optimizer update.",
+            })
+        training_advice = {
+            "mode": requested_mode,
+            "mode_title": mode_title,
+            "base_model": base_model or None,
+            "mode_valid": mode_valid,
+            "items": advice,
+            "requested": {
+                "steps": requested_steps, "examples": requested_examples,
+                "batch_size": requested_batch, "grad_accum": requested_accum, "seq_len": requested_seq,
+            },
+            "dataset_estimate": {
+                "text_bytes": text_bytes,
+                "sequence_samples": estimated_sequences,
+                "effective_batch": effective_batch,
+                "updates_per_corpus": estimated_updates_per_corpus,
+                "note": "根据 UTF-8 字节数和序列长度估算；当前训练使用随机窗口，实际覆盖率不是固定遍历次数。",
+            },
+        }
         # Pre-training estimates are deliberately labeled as rough. Once a
         # run starts, training_state() replaces them with measured ETA from
         # completed optimizer steps. The baseline is calibrated to the local
@@ -427,6 +504,9 @@ class OrbitRuntime:
             "estimated_peak_memory_gb": round(estimated_peak_memory, 1),
             "estimated_activation_delta_gb": round(max(0.0, estimated_peak_memory - required), 1),
             "estimate_note": "粗略估算；训练开始后会用实际步速和 ETA 替换。教师 API 生成时间另计。",
+            "training_advice": training_advice,
+            "training_mode": requested_mode,
+            "mode_valid": mode_valid,
         }
 
     def system_state(self) -> dict[str, Any]:
@@ -624,10 +704,29 @@ class OrbitRuntime:
             raise ValueError("训练语言必须是中文、English 或中英双语")
         return language
 
+    @staticmethod
+    def _training_mode(payload: dict[str, Any], *, require_valid: bool = True) -> tuple[str, str | None]:
+        """Return the explicit training mode and its optional parent model.
+
+        Older clients did not send ``training_mode``; infer it from the
+        parent checkpoint for backwards compatibility.  New clients must not
+        silently turn a requested fine-tune into random-init pretraining.
+        """
+        parent = str(payload.get("base_model", "")).strip() or None
+        mode = str(payload.get("training_mode", "")).strip().lower()
+        if mode not in {"pretraining", "fine_tuning"}:
+            mode = "fine_tuning" if parent else "pretraining"
+        if mode == "pretraining":
+            parent = None
+        elif require_valid and not parent:
+            raise ValueError("已选择微调，请先选择一个已有模型；或者切换为预训练（从零开始）")
+        return mode, parent
+
     def _teacher_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         preset = str(payload.get("preset", "300m")).lower()
         cfg = OrbitConfig.for_preset(preset)
         train_cfg = self._training_config(payload)
+        training_mode, parent_model = self._training_mode(payload, require_valid=False)
         return {
             "preset": preset,
             "parameters": cfg.estimate_parameters(),
@@ -636,7 +735,8 @@ class OrbitRuntime:
             "identity_training_rule": "回答‘你是谁’时必须说明自己是 Orbit，由 YUNSH 开发；训练内容不能改变产品身份。",
             "context_length": train_cfg.seq_len,
             "training_steps": train_cfg.steps,
-            "base_model": str(payload.get("base_model", "")).strip() or None,
+            "training_mode": training_mode,
+            "base_model": parent_model,
             "model_name": str(payload.get("model_name", "")).strip() or None,
             "data_language": self._data_language(payload),
         }
@@ -656,7 +756,7 @@ class OrbitRuntime:
         cfg = OrbitConfig.for_preset(preset)
         require_training_capacity(cfg.estimated_training_memory_gb(), cfg.estimate_parameters(), self.models_root)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        parent_model = str(payload.get("base_model", "")).strip() or None
+        _, parent_model = self._training_mode(payload)
         if parent_model:
             self._checkpoint_for(parent_model)
             parent_preset = str(self._model_metadata(parent_model).get("preset", ""))
@@ -725,6 +825,7 @@ class OrbitRuntime:
             "completed_at": None, "model_id": model_id, "model_name": display_name,
             "preset": preset, "parameters": cfg.estimate_parameters(), "parent_model": parent_model,
             "assisted": bool(payload.get("_assisted")), "training_goal": str(payload.get("instruction", "")),
+            "training_mode": "fine_tuning" if parent_model else "pretraining",
             "corpus_mode": "mixed" if parent_model else "document",
             "identity_training_injected": True,
             "dataset": str(dataset), "training_dataset": str(training_dataset),
@@ -737,7 +838,8 @@ class OrbitRuntime:
         metadata = {
             "name": display_name, "display_name": display_name, "model_id": model_id,
             "preset": preset, "parameters": cfg.estimate_parameters(),
-            "identity": "Orbit", "developer": "YUNSH", "system_prompt": ORBIT_IDENTITY, "parent_model": parent_model,
+            "identity": "Orbit", "developer": "YUNSH", "system_prompt": ORBIT_IDENTITY,
+            "training_mode": "fine_tuning" if parent_model else "pretraining", "parent_model": parent_model,
             "identity_training_examples": ORBIT_TRAINING_ANCHOR,
             "training_runs": [run_id], "architecture": "orbit-hybrid-moe-v1", "ollama_ready": False,
             "created_at": run["created_at"],
@@ -873,6 +975,7 @@ class OrbitRuntime:
     def start_training(self, payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text", "")).strip()
         self._training_config(payload)
+        self._training_mode(payload)
         with self._state_lock:
             self._assert_idle()
             self._stop_event.clear()
@@ -895,6 +998,7 @@ class OrbitRuntime:
         if payload.get("acknowledge_cost") is not True:
             raise ValueError("请先确认训练目标会发送给所选 AI API，且提供商可能收取费用")
         provider = str(payload.get("teacher_provider", "deepseek")).strip().lower()
+        self._training_mode(payload)
         private_settings = self.teacher_settings()
         stored_rows = private_settings.get("profiles", {}).get(provider, [])
         requested_profile_id = str(payload.get("teacher_profile_id", "")).strip()
@@ -906,7 +1010,7 @@ class OrbitRuntime:
             model=str(payload.get("teacher_model", "deepseek-v4-flash")),
             instruction=str(payload.get("instruction", "")), examples=int(payload.get("examples", 20)),
             language=str(payload.get("language", "中文")),
-            corpus_mode=("mixed" if str(payload.get("base_model", "")).strip() else "document"),
+            corpus_mode=("mixed" if self._training_mode(payload, require_valid=False)[0] == "fine_tuning" else "document"),
             model_profile=self._teacher_model_profile(payload),
         )
         teacher.validate()
@@ -1082,7 +1186,8 @@ class OrbitRuntime:
         payload: dict[str, Any] = {
             "model_name": str(run.get("model_name") or model_id),
             "preset": str(run.get("preset", "300m")),
-            "base_model": "", "device": str(run.get("device", "auto")),
+            "training_mode": str(run.get("training_mode") or ("fine_tuning" if run.get("parent_model") else "pretraining")),
+            "base_model": str(run.get("parent_model") or ""), "device": str(run.get("device", "auto")),
             "data_language": str(run.get("data_language", "bilingual")),
             "_dataset_path": str(dataset), "_resume_model_id": model_id,
             "_resume_checkpoint": str(checkpoint), "_resume_run_id": selected_id,
