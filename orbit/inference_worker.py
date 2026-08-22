@@ -42,15 +42,15 @@ def main() -> None:
             if requested_device == "cuda" and not torch.cuda.is_available():
                 raise RuntimeError("请求使用 CUDA，但当前系统不可用")
             device = requested_device
+        elif torch.backends.mps.is_available():
+            # On Apple Silicon the byte-level Orbit model is materially faster
+            # on MPS than CPU.  Auto must follow the same accelerator choice as
+            # local training; forcing CPU made the first chat exceed the
+            # 45-second request guard even though MPS was available.
+            device = "mps"
         elif torch.cuda.is_available():
             device = "cuda"
         else:
-            device = "cpu"
-        # This model's custom routing/index operations currently fall back to
-        # slow MPS kernels on Apple Silicon. CPU is substantially faster for
-        # local inference on this architecture; training keeps its separate
-        # MPS auto-selection.
-        if requested_device == "auto" and device == "mps":
             device = "cpu"
         model = model.to(device).eval()
         # MPS lazily compiles kernels on the first forward pass. Without a
