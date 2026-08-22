@@ -114,7 +114,7 @@ def generate_dataset(
         language_instruction = {
             "zh": "主要使用简体中文。",
             "en": "Use English as the primary language.",
-            "bilingual": "使用自然的简体中文和英语双语，保持两种语言数量大致均衡；适合时提供语义一致的中英对应样本。",
+            "bilingual": "必须同时使用简体中文和 English；每一段都要包含中文和英文内容，尽量提供语义对应的双语段落，禁止整段只写英文或只写中文。",
         }.get(config.language, f"主要语言：{config.language}")
         if config.corpus_mode == "mixed":
             style_instruction = (
@@ -158,7 +158,15 @@ def generate_dataset(
                 last_error = RuntimeError("教师 API 返回了无法识别的响应格式")
                 content = ""
             if content:
-                break
+                if config.language == "bilingual" and not any("\u4e00" <= char <= "\u9fff" for char in content):
+                    last_error = RuntimeError("教师 API 返回了英文-only 内容，双语训练要求每段同时包含中文")
+                    content = ""
+                    payload["messages"][-1]["content"] += (
+                        "\n上一版输出不合格：不能只有 English。请重新生成，确保每一段都同时包含简体中文和 English，"
+                        "并保持文献/技术语料为主。"
+                    )
+                else:
+                    break
             last_error = RuntimeError("教师 API 返回了空内容")
             if content_attempt < 3:
                 if stop_event.wait(content_attempt * 2):

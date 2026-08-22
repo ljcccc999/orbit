@@ -68,6 +68,41 @@ private final class WindowDragHandle: NSView {
     }
 }
 
+/// WKWebView consumes mouse events before the window's background-move
+/// behavior can see them.  Keep normal clicks intact, but turn a sustained
+/// press into a native window drag so text is not selected while repositioning
+/// the App window.
+private final class OrbitWebView: WKWebView {
+    private var dragTimer: Timer?
+    private var initialMouseDown: NSEvent?
+
+    override func mouseDown(with event: NSEvent) {
+        initialMouseDown = event
+        dragTimer?.invalidate()
+        dragTimer = Timer.scheduledTimer(withTimeInterval: 0.28, repeats: false) { [weak self] _ in
+            guard let self, let initialMouseDown, let window = self.window, window.isKeyWindow else { return }
+            window.performDrag(with: initialMouseDown)
+        }
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragTimer?.invalidate()
+        dragTimer = nil
+        initialMouseDown = nil
+        super.mouseUp(with: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        dragTimer?.invalidate()
+        dragTimer = nil
+        initialMouseDown = nil
+        super.rightMouseDown(with: event)
+    }
+
+    deinit { dragTimer?.invalidate() }
+}
+
 final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
@@ -167,7 +202,16 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
         let container = NSView(frame: window.contentView!.bounds)
         container.autoresizingMask = [.width, .height]
         window.contentView = container
-        webView = WKWebView(frame: container.bounds)
+        let webConfiguration = WKWebViewConfiguration()
+        let preferredLanguage = Locale.preferredLanguages.first?.lowercased() ?? Locale.current.identifier.lowercased()
+        let nativeLanguage = preferredLanguage.hasPrefix("zh") ? "zh" : "en"
+        let languageScript = WKUserScript(
+            source: "window.orbitNativeLanguage='\(nativeLanguage)';",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        webConfiguration.userContentController.addUserScript(languageScript)
+        webView = OrbitWebView(frame: container.bounds, configuration: webConfiguration)
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
         webView.isHidden = true

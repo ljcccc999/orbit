@@ -50,8 +50,28 @@ private final class OrbitServiceMenu: NSObject, NSApplicationDelegate {
     @objc private func quitAPI() {
         Task {
             try? await runOrbit(["service", "uninstall"])
-            await MainActor.run { NSApp.terminate(nil) }
+            await MainActor.run {
+                // The desktop App normally keeps the API alive after its
+                // window is closed.  A menu-bar quit must be the explicit
+                // exception, so terminate that companion first; otherwise
+                // its health monitor would immediately start the API again.
+                NSRunningApplication.runningApplications(withBundleIdentifier: "top.orbit.desktop")
+                    .forEach { $0.terminate() }
+                removeServiceMenuAgent()
+                NSApp.terminate(nil)
+            }
         }
+    }
+
+    private func removeServiceMenuAgent() {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/LaunchAgents/top.orbit.service-menu.plist")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["bootout", "gui/\(getuid())", "top.orbit.service-menu"]
+        try? process.run()
+        process.waitUntilExit()
+        try? FileManager.default.removeItem(at: path)
     }
 
     private func orbitExecutable() -> String {
