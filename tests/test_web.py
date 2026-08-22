@@ -139,6 +139,9 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert 'data-i18n="fineTuning"' in PAGE
     assert "function syncTrainingMode" in PAGE
     assert "system.models[0].id" in PAGE
+    assert 'id="baseModelSource"' in PAGE
+    assert 'id="downloadBasePanel"' in PAGE
+    assert "/api/models/download" in PAGE
     assert 'id="community" class="page"' in PAGE
     assert "/api/community/submit" in PAGE
     assert "/api/training/recommendation" in PAGE

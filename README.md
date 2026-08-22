@@ -95,7 +95,7 @@ These are conservative full-training estimates that include optimizer state and 
 
 Open the **Training** page, choose a preset, optionally name the model or select a parent checkpoint, paste your own text, and choose how to train:
 
-- **Pretraining (from scratch)** starts with random Orbit weights. **Fine-tuning** requires a compatible local Orbit checkpoint and continues that model's lineage; Orbit never silently changes one mode into the other.
+- **Pretraining (from scratch)** starts with random Orbit weights. **Fine-tuning** can continue an already-trained local Orbit checkpoint or a downloaded, validated Orbit-compatible checkpoint; the Training page separates local and download sources and preserves the parent lineage. Orbit never silently changes one mode into the other.
 - Manual documents are shown with an estimated sample count based on UTF-8 corpus size and sequence length. The page warns about small datasets, overfitting, excessive context, unsafe memory pressure, and unrealistic pretraining goals, then suggests safer settings.
 
 1. **Train on this computer** starts a local job only after the memory gate passes. The checkpoint stays in `~/.orbit/models`.
@@ -122,7 +122,7 @@ See the bilingual [Community Contribution Policy](COMMUNITY_POLICY.md) for the f
 
 `server/` contains an optional small-server Hub for accounts, administrator review, finished-model uploads, and locally generated GPU training packages. Orbit creates the package on the user's computer and imports it to the configured server with chunking and checksum verification. The Hub stores it for the user's GPU workflow but never executes or loads an uploaded file automatically. See [server/README.md](server/README.md) for deployment and security boundaries.
 
-The 300M–38B choices describe Orbit architecture sizes; they are not pretrained model downloads. External Hugging Face/Qwen checkpoints are not directly compatible with the current byte-level Orbit trainer yet; a real tokenizer, architecture, and weight-format adapter is required before they can be offered as fine-tuning bases. Training a useful foundation model from scratch requires a large, carefully prepared dataset and substantial compute.
+The 300M–38B choices describe Orbit architecture sizes. The Training page can download an HTTPS Orbit checkpoint, validate its architecture, and add it to the local base-model list. External Hugging Face/Qwen checkpoints are not directly compatible with the current byte-level Orbit trainer yet; a real tokenizer, architecture, and weight-format adapter is required before they can be offered as fine-tuning bases. Training a useful foundation model from scratch requires a large, carefully prepared dataset and substantial compute.
 
 ## Chat locally
 

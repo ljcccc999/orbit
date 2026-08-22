@@ -11,8 +11,11 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .config import OrbitConfig
 from .community import CommunityStore
@@ -31,6 +34,7 @@ from .training_config import TrainingConfig
 
 
 PRESETS = ("300m", "1b", "3b", "7b", "14b", "38b")
+MAX_MODEL_DOWNLOAD_BYTES = 64 * 1024 * 1024 * 1024
 # Kept as a compatibility alias for existing metadata and integrations.
 ORBIT_IDENTITY = ORBIT_SYSTEM_PROMPT
 
@@ -57,6 +61,7 @@ class OrbitRuntime:
         self.hub = OrbitHubClient(self.data_root)
         self.settings = OrbitSettings(self.data_root)
         self._hub_upload: dict[str, Any] = {"status": "idle", "progress": 0, "message": "尚未上传", "model": None}
+        self._model_download: dict[str, Any] = {"status": "idle", "progress": 0, "message": "没有正在下载模型", "model": None}
         self._pending_training: tuple[dict[str, Any], str, dict[str, Any], str] | None = None
         self._memory_resume_thread: threading.Thread | None = None
         self._state_lock = threading.RLock()
@@ -540,6 +545,118 @@ class OrbitRuntime:
     def loading_state(self) -> dict[str, Any]:
         with self._state_lock:
             return dict(self._loading)
+
+    def model_download_state(self) -> dict[str, Any]:
+        with self._state_lock:
+            return dict(self._model_download)
+
+    @staticmethod
+    def _download_url(value: str) -> str:
+        url = str(value or "").strip()
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("模型下载地址必须是不带账号密码的 HTTPS 地址")
+        host = parsed.hostname.lower()
+        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+            raise ValueError("模型下载地址不能指向本机或局域网地址")
+        try:
+            import ipaddress
+            address = ipaddress.ip_address(host)
+            if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+                raise ValueError("模型下载地址不能指向本机或私有网络地址")
+        except ValueError as exc:
+            if "不能指向" in str(exc):
+                raise
+            # Domain names are allowed; urllib will perform the HTTPS request.
+        return url
+
+    @staticmethod
+    def _downloaded_checkpoint_config(path: Path) -> tuple[OrbitConfig, str]:
+        """Validate a downloaded file without placing arbitrary weights in the model list."""
+        try:
+            import torch
+            try:
+                payload = torch.load(path, map_location="meta", weights_only=True)
+            except TypeError:  # pragma: no cover - compatibility with older torch
+                payload = torch.load(path, map_location="meta")
+        except Exception as exc:
+            raise ValueError("下载文件不是可读取的 Orbit checkpoint") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("config"), dict) or not isinstance(payload.get("model"), dict):
+            raise ValueError("下载文件不是 Orbit checkpoint，不能作为微调基础模型")
+        try:
+            config = OrbitConfig(**payload["config"])
+            config.validate()
+        except Exception as exc:
+            raise ValueError("下载模型的架构配置不是 Orbit 格式") from exc
+        if config.vocab_size != 256:
+            raise ValueError("该模型使用其他 tokenizer/词表；当前 Orbit 训练器暂不支持 Qwen 等外部权重")
+        for preset in PRESETS:
+            if config == OrbitConfig.for_preset(preset):
+                return config, preset
+        if config == OrbitConfig.tiny():
+            return config, "local"
+        raise ValueError("该 Orbit checkpoint 的架构暂不在可微调的 300M–38B 档位中")
+
+    def start_model_download(self, payload: dict[str, Any]) -> dict[str, Any]:
+        url = self._download_url(str(payload.get("url", "")))
+        raw_name = str(payload.get("model_name", "")).strip()
+        parsed = urlparse(url)
+        fallback = Path(parsed.path).stem or "downloaded-orbit"
+        model_id = self._safe_model_name(raw_name, fallback)
+        checkpoint = self.models_root / f"{model_id}.pt"
+        if checkpoint.exists():
+            raise ValueError(f"模型名称已存在：{model_id}，请换一个名称")
+        with self._state_lock:
+            if self._model_download.get("status") in {"downloading", "validating"}:
+                raise RuntimeError("已有模型正在下载")
+            if self._work_thread is not None and self._work_thread.is_alive():
+                raise RuntimeError("训练进行中，不能同时下载基础模型")
+            self._model_download = {"status": "downloading", "progress": 0, "message": "正在下载模型", "model": model_id, "url": url}
+
+        temporary = checkpoint.with_suffix(".pt.download")
+
+        def worker() -> None:
+            try:
+                request = urllib.request.Request(url, headers={"User-Agent": "Orbit/0.6 model downloader"})
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    total = int(response.headers.get("Content-Length", "0") or 0)
+                    if total > MAX_MODEL_DOWNLOAD_BYTES:
+                        raise ValueError("模型下载超过 Orbit 的 64GB 安全上限")
+                    received = 0
+                    with temporary.open("wb") as output:
+                        while True:
+                            block = response.read(4 * 1024 * 1024)
+                            if not block:
+                                break
+                            received += len(block)
+                            if received > MAX_MODEL_DOWNLOAD_BYTES:
+                                raise ValueError("模型下载超过 Orbit 的 64GB 安全上限")
+                            output.write(block)
+                            with self._state_lock:
+                                self._model_download.update(progress=round(received / total * 100, 1) if total else 0, received_bytes=received, total_bytes=total)
+                with self._state_lock:
+                    self._model_download.update(status="validating", message="正在验证 Orbit checkpoint", progress=100)
+                config, preset = self._downloaded_checkpoint_config(temporary)
+                metadata = {
+                    "name": model_id, "display_name": model_id, "model_id": model_id,
+                    "preset": preset, "parameters": config.estimate_parameters(),
+                    "identity": "Orbit", "developer": "YUNSH", "system_prompt": ORBIT_IDENTITY,
+                    "training_mode": "pretraining", "parent_model": None, "training_runs": [],
+                    "identity_training_examples": ORBIT_TRAINING_ANCHOR,
+                    "architecture": "orbit-hybrid-moe-v1", "ollama_ready": False,
+                    "origin": "downloaded", "source_url": url, "downloaded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                }
+                os.replace(temporary, checkpoint)
+                self._write_model_metadata(model_id, metadata)
+                with self._state_lock:
+                    self._model_download.update(status="completed", message="模型已下载并加入基础模型列表", model=model_id, preset=preset)
+            except Exception as exc:
+                temporary.unlink(missing_ok=True)
+                with self._state_lock:
+                    self._model_download.update(status="failed", message=str(exc), error=str(exc))
+
+        threading.Thread(target=worker, name="orbit-model-download", daemon=True).start()
+        return self.model_download_state()
 
     def list_models(self) -> list[dict[str, Any]]:
         rows = []

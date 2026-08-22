@@ -423,10 +423,10 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     "navSettings:'Settings'",
-    "navSettings:'Settings',importCorpus:'Import local corpus',importCorpusHelp:'Reads only a local text file you select; it does not fetch literature or read conversations.'",
+    "navSettings:'Settings',baseModelSource:'Base model source',localModel:'Local model',downloadModel:'Download compatible model',baseModelSourceHelp:'Fine-tune an existing Orbit checkpoint or download a compatible Orbit checkpoint first.',downloadUrl:'Model HTTPS URL',downloadName:'Downloaded model name',downloadHelp:'Only Orbit checkpoints are accepted; external Qwen weights need an adapter and cannot be fine-tuned here yet.',downloadStart:'Download and verify model',importCorpus:'Import local corpus',importCorpusHelp:'Reads only a local text file you select; it does not fetch literature or read conversations.'",
 ).replace(
     "navSettings:'设置'",
-    "navSettings:'设置',importCorpus:'导入本地文献/代码',importCorpusHelp:'只读取你选择的本地文本文件；不会联网抓取文献或读取聊天记录。'",
+    "navSettings:'设置',baseModelSource:'基础模型来源',localModel:'本地模型',downloadModel:'下载兼容模型',baseModelSourceHelp:'可以微调已经训练的 Orbit，也可以先下载兼容的 Orbit checkpoint。',downloadUrl:'模型 HTTPS 下载地址',downloadName:'下载后模型名',downloadHelp:'只接受 Orbit checkpoint；Qwen 等外部权重需要适配器，目前不能直接微调。',downloadStart:'下载并验证模型',importCorpus:'导入本地文献/代码',importCorpusHelp:'只读取你选择的本地文本文件；不会联网抓取文献或读取聊天记录。'",
 )
 PAGE = PAGE.replace(
     "baseModel:'Base model',baseModelHelp:",
@@ -477,4 +477,18 @@ PAGE = PAGE.replace(
 PAGE = PAGE.replace(
     "$('startTraining').disabled=!r.feasible||modelNameConflict;renderConfigImpact(r);",
     "const modeReady=r.mode_valid!==false;$('startTraining').disabled=!r.feasible||!modeReady||modelNameConflict;$('autoTraining').disabled=!modeReady;renderConfigImpact(r);",
+)
+
+# Fine-tuning can use an already-trained local Orbit model or a compatible
+# Orbit checkpoint downloaded from an HTTPS URL.  External Qwen/Hugging Face
+# weights remain visibly unsupported until a real tokenizer/architecture
+# adapter exists; never present them as downloadable fine-tuning bases.
+PAGE = PAGE.replace(
+    '<div class="form-grid"><div class="field"><label data-i18n="modelScale">Model scale</label>',
+    '<div class="field"><label data-i18n="baseModelSource">基础模型来源</label><select id="baseModelSource"><option value="local" data-i18n="localModel">本地模型</option><option value="download" data-i18n="downloadModel">下载兼容模型</option></select><span class="help" data-i18n="baseModelSourceHelp">微调已训练的 Orbit，或下载兼容 Orbit checkpoint 后再选择。</span></div><div id="downloadBasePanel" class="notice" hidden><div class="form-grid"><div class="field"><label data-i18n="downloadUrl">模型 HTTPS 下载地址</label><input id="downloadModelUrl" type="url" placeholder="https://…/orbit-checkpoint.pt"><span class="help" data-i18n="downloadHelp">只接受 Orbit checkpoint；Qwen 等外部权重当前不能直接微调。</span></div><div class="field"><label data-i18n="downloadName">下载后模型名</label><input id="downloadModelName" placeholder="orbit-downloaded"></div></div><div class="actions"><button class="button" id="downloadBaseButton" data-i18n="downloadStart">下载并验证模型</button></div><div id="downloadBaseStatus" class="help"></div></div><div class="form-grid"><div class="field"><label data-i18n="modelScale">Model scale</label>',
+)
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    """function syncBaseModelSource(){const source=$('baseModelSource'),panel=$('downloadBasePanel');if(!source||!panel)return;panel.hidden=source.value!=='download';$('baseModel').disabled=$('trainingMode').value==='pretraining';}function renderModelDownload(s){const box=$('downloadBaseStatus');if(!box||!s)return;const zh=currentLang==='zh';if(s.status==='downloading'){box.textContent=(zh?'正在下载模型':'Downloading model')+(s.progress?` · ${s.progress}%`:'')}else if(s.status==='validating'){box.textContent=zh?'正在验证 Orbit checkpoint…':'Validating Orbit checkpoint…'}else if(s.status==='completed'){box.textContent=zh?`已下载并加入本地模型：${s.model}`:`Downloaded and added locally: ${s.model}`}else if(s.status==='failed'){box.textContent=(zh?'下载失败：':'Download failed: ')+(s.message||'')}else{box.textContent=''}}async function downloadBaseModel(){const url=$('downloadModelUrl')?.value.trim(),name=$('downloadModelName')?.value.trim();if(!url){toast(currentLang==='zh'?'请先填写模型 HTTPS 下载地址。':'Enter an HTTPS model URL first.');return}const button=$('downloadBaseButton');button.disabled=true;try{await request('/api/models/download',{method:'POST',body:JSON.stringify({url,model_name:name})});const timer=setInterval(async()=>{try{const s=await request('/api/models/downloading');renderModelDownload(s);if(['completed','failed'].includes(s.status)){clearInterval(timer);button.disabled=false;await refreshSystem();if(s.status==='completed'){const id=s.model||'';$('baseModelSource').value='local';syncBaseModelSource();if([...$('baseModel').options].some(o=>o.value===id))$('baseModel').value=id;$('trainingMode').value='fine_tuning';syncTrainingMode(false)}}}catch(e){clearInterval(timer);button.disabled=false;toast(e.message)}},800)}catch(e){button.disabled=false;toast(e.message)}}$('baseModelSource')?.addEventListener('change',syncBaseModelSource);$('downloadBaseButton')?.addEventListener('click',downloadBaseModel);syncBaseModelSource(); </script></body></html>""",
+    1,
 )

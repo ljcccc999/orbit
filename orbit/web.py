@@ -164,6 +164,7 @@ class Handler(BaseHTTPRequestHandler):
                     "active_model": runtime.active_model_id,
                     "active_model_name": runtime.active_model_name,
                     "loading": runtime.loading_state(),
+                    "model_download": runtime.model_download_state(),
                     "resources": runtime.system_state(),
                     "local_api_key": runtime.local_api_key,
                     "api_keys": runtime.list_api_keys(),
@@ -179,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.list_models())
             elif path == "/api/models/loading":
                 self._json(200, self.server.runtime.loading_state())
+            elif path == "/api/models/downloading":
+                self._json(200, self.server.runtime.model_download_state())
             elif path == "/api/keys":
                 self._json(200, self.server.runtime.list_api_keys())
             elif path == "/api/community":
@@ -317,6 +320,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.delete_training_run(str(data.get("id", ""))))
             elif path == "/api/models/load":
                 self._json(202, self.server.runtime.start_load_model(str(data.get("model", ""))))
+            elif path == "/api/models/download":
+                self._json(202, self.server.runtime.start_model_download(data))
             elif path == "/api/models/unload":
                 self._json(200, self.server.runtime.unload_model())
             elif path == "/api/models/delete":
