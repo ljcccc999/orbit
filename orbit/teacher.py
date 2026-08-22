@@ -144,9 +144,9 @@ def generate_dataset(
             ],
             "stream": False,
             "temperature": 0.9,
-            # Deliberately omit max_tokens. Orbit does not impose an output
-            # token ceiling; the provider decides its own context, timeout,
-            # quota and safety limits.
+            # Allow a large document response. The provider may still reject
+            # or lower this according to its own context and quota rules.
+            "max_tokens": 50_000,
         }
         content = ""
         last_error: Exception | None = None
