@@ -1430,28 +1430,3 @@ $('preventSleep').onchange=()=>saveOperationalSetting('prevent_sleep',$('prevent
 ''' + "</script></body></html>",
     1,
 )
-
-# ===== 2026-08-23 模型库统一默认（保留旧本地模型库页面） =====
-# 1) 模型库（Orbit Code 的“API 与模型”页）中排第一/标记“默认”的模型，同时作为
-#    对话页和 Orbit Code 的默认模型：对话页 chatModel 默认选中模型库默认的本地模型；
-#    模型库默认是 API 模型时，对话保持“自动选择”。
-# 2) 模型库中本地模型行的操作菜单补回原本地模型库的能力：加载/卸载、二次训练、
-#    服务器导出、Ollama 导出、上传到 Hub。旧“本机模型”页面按 Tim 要求保留。
-# 模型库本地模型行菜单：加载/卸载、二次训练、导出、上传 Hub（保留编辑/删除）。
-PAGE = PAGE.replace(
-    "`<button onclick=\"editCodeLocalModel('${x.id}')\">编辑本地模型</button><button class=\"danger\" onclick=\"deleteCodeLibraryModel('${x.key}')\">删除本地模型</button>`",
-    "`<button onclick=\"toggleModel('${eid(x.id)}')\">${x.active?t('unload'):t('load')}</button><button onclick=\"continueTraining('${eid(x.id)}')\">${t('continueTrain')}</button><button onclick=\"exportModel('${eid(x.id)}','server')\">${t('serverExport')}</button><button onclick=\"exportModel('${eid(x.id)}','ollama')\">${t('ollamaExport')}</button><button onclick=\"uploadModel('${eid(x.id)}')\">${t('uploadHub')}</button><button onclick=\"editCodeLocalModel('${x.id}')\">编辑本地模型</button><button class=\"danger\" onclick=\"deleteCodeLibraryModel('${x.key}')\">删除本地模型</button>`",
-    1,
-)
-PAGE = PAGE.replace(
-    "</script></body></html>",
-    r'''
-let chatModelUserTouched=false;
-(function(){const el=document.getElementById('chatModel');if(el)el.addEventListener('change',()=>{chatModelUserTouched=true})})();
-function applyChatModelDefault(){const el=document.getElementById('chatModel'),ds=codeSettings;if(!el||!ds||chatModelUserTouched)return;let def='';if(ds.provider==='local')def=ds.model||'';if(def&&[...el.options].some(o=>o.value===def))el.value=def;else if(ds.provider!=='local')el.value=''}
-const _orbitRefreshSystemChatModel=refreshSystem;refreshSystem=async function(){const result=await _orbitRefreshSystemChatModel();applyChatModelDefault();return result};
-(async()=>{try{codeSettings=await request('/api/code/settings');applyChatModelDefault()}catch(e){}})();
-Object.assign(EN,{uploadHub:'Upload to Hub'});Object.assign(ZH,{uploadHub:'上传到 Hub'});
-''' + "</script></body></html>",
-    1,
-)

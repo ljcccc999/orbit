@@ -12,3 +12,13 @@ orbit-jobs/
 *.pt
 *.pth
 *.safetensors
+
+# 2026-08-23: 模型实现源码本地管理，不在 GitHub 公开（详见 模型源码/ 与 重要文件副本/）
+/orbit/model.py
+/orbit/training_config.py
+/orbit/train.py
+/orbit/training_worker.py
+/orbit/inference_worker.py
+/orbit/teacher.py
+/orbit/remote_assist.py
+/OCA-Research/
