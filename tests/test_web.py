@@ -263,6 +263,13 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert 'id="composerAdvancedToggle"' in PAGE
     assert 'const codeSourceField=' in PAGE
     assert "$('codeAdvanced').textContent=modelText" in PAGE
+    assert "function configureContextualSidebar(mode)" in PAGE
+    assert ".sidebar.mode-training>.nav button[data-page=\"community\"]" in PAGE
+    assert ".sidebar.mode-orbit>.nav button[data-page=\"community\"]" not in PAGE
+    assert "orbitWorkspaceMode!=='code'" in PAGE
+    assert "showPage('codeApi')" in PAGE
+    assert "title.textContent=currentLang==='zh'?'训练历史':'Training history'" in PAGE
+    assert "title.textContent=currentLang==='zh'?'Code 对话历史':'Code conversations'" in PAGE
 
 
 def test_external_base_models_are_not_allowed_for_from_scratch_training(tmp_path):

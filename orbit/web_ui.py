@@ -343,6 +343,61 @@ PAGE = PAGE.replace(
     ".current-activity{display:flex;align-items:center;gap:9px;min-height:38px;padding:8px 18px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.34);color:var(--muted);font-size:12px}.current-activity[hidden]{display:none}.activity-orbit{width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:orbitActivitySpin 1s linear infinite}.activity-detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.thinking .event-card{border:0;background:transparent}.thinking .event-card>summary{padding-left:0;color:var(--muted)}@keyframes orbitActivitySpin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.activity-orbit{animation:none;border-right-color:rgba(33,104,243,.25)}}</style>",
     1,
 )
+
+# Codex-like contextual sidebar: product switch, one primary create action,
+# mode-specific fixed destinations, then only that mode's history.  Training
+# owns collaboration; it must never leak into Orbit chat or Orbit Code.
+PAGE = PAGE.replace(
+    "</style>",
+    r"""
+.sidebar{position:relative;padding:12px 10px 12px;border-right:1px solid rgba(77,88,108,.10);background:linear-gradient(145deg,rgba(246,248,251,.72),rgba(229,234,242,.57));backdrop-filter:blur(38px) saturate(175%);box-shadow:inset -1px 0 rgba(255,255,255,.58)}
+.sidebar .brand{min-height:42px;height:42px;margin:0 3px 9px;padding:0;border:0;background:transparent;box-shadow:none}
+.brand-switch{padding:7px 9px!important;border-radius:10px!important;font-size:17px!important}
+.sidebar>.nav{display:grid;gap:2px;padding:0 3px 9px;border-bottom:1px solid rgba(70,82,102,.09)}
+.sidebar>.nav button{min-height:36px;padding:8px 9px;border-radius:9px;color:#303846;font-weight:590}
+.sidebar>.nav button:hover{background:rgba(255,255,255,.52)}
+.sidebar>.nav button.active{background:rgba(255,255,255,.68);box-shadow:inset 0 1px rgba(255,255,255,.84),0 2px 10px rgba(42,52,71,.04)}
+.sidebar>.nav button[data-page]{display:none!important}
+.sidebar.mode-orbit>.nav button[data-page="chat"],.sidebar.mode-orbit>.nav button[data-page="plugins"],.sidebar.mode-orbit>.nav button[data-page="models"],.sidebar.mode-orbit>.nav button[data-page="api"],
+.sidebar.mode-code>.nav button[data-page="chat"],.sidebar.mode-code>.nav button[data-page="plugins"],.sidebar.mode-code>.nav button[data-page="api"],
+.sidebar.mode-training>.nav button[data-page="chat"],.sidebar.mode-training>.nav button[data-page="models"],.sidebar.mode-training>.nav button[data-page="community"],.sidebar.mode-training>.nav button[data-page="api"]{display:flex!important}
+.sidebar-history{margin:8px 3px 10px;gap:4px}
+.sidebar-history-title{padding:5px 8px 3px;color:#7e8590;font-size:11px;font-weight:600}
+.sidebar-history-list{padding-right:2px}
+.sidebar-history-list .run-item{width:100%;padding:8px 9px;border-radius:9px;color:#3d4552}
+.sidebar-history-list .run-item:hover,.sidebar-history-list .run-item.active{background:rgba(255,255,255,.56)}
+.side-bottom{background:transparent}
+.toolbar{background:rgba(250,251,253,.64);backdrop-filter:blur(30px) saturate(165%)}
+.toolbar-nav{padding:3px;border-color:rgba(255,255,255,.86);border-radius:12px;background:linear-gradient(145deg,rgba(255,255,255,.70),rgba(236,240,246,.48));backdrop-filter:blur(30px) saturate(190%);box-shadow:0 8px 25px rgba(35,45,65,.08),inset 0 1px rgba(255,255,255,.98),inset 0 -1px rgba(116,128,148,.08)}
+.toolbar-nav button{width:32px;height:30px;border-radius:9px}
+.toolbar-nav button+button{border-left:1px solid rgba(88,99,118,.08)}
+@media(prefers-reduced-transparency:reduce){.sidebar,.toolbar,.toolbar-nav{background:#f4f6f9;backdrop-filter:none}}
+""" + "</style>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+function configureContextualSidebar(mode){
+  orbitSidebar.classList.remove('mode-orbit','mode-training','mode-code');
+  orbitSidebar.classList.add('mode-'+mode);
+  const labels={
+    orbit:{chat:['◉','新对话','New chat'],plugins:['✦','插件','Plugins'],models:['◇','模型','Models'],api:['⌘','API','API']},
+    training:{chat:['＋','新训练','New training'],models:['◇','模型','Models'],community:['◎','协作','Collaboration'],api:['⌘','API','API']},
+    code:{chat:['＋','新对话','New chat'],plugins:['✦','插件','Plugins'],api:['⌘','API 与模型','API & models']}
+  }[mode];
+  Object.entries(labels).forEach(([page,value])=>{const button=orbitSidebar.querySelector(`.nav button[data-page="${page}"]`);if(!button)return;button.querySelector('.icon').textContent=value[0];button.querySelector('span:last-child').textContent=currentLang==='zh'?value[1]:value[2]});
+}
+const _orbitModeSidebar=setOrbitWorkspaceMode;
+setOrbitWorkspaceMode=function(mode){_orbitModeSidebar(mode);configureContextualSidebar(mode)};
+const orbitApiButton=orbitSidebar.querySelector('.nav button[data-page="api"]');
+if(orbitApiButton)orbitApiButton.addEventListener('click',event=>{if(orbitWorkspaceMode!=='code')return;event.preventDefault();event.stopImmediatePropagation();showPage('codeApi')},{capture:true});
+const orbitCommunityButton=orbitSidebar.querySelector('.nav button[data-page="community"]');
+if(orbitCommunityButton)orbitCommunityButton.addEventListener('click',()=>setOrbitWorkspaceMode('training'),{capture:true});
+configureContextualSidebar(orbitWorkspaceMode);
+''' + "</script></body></html>",
+    1,
+)
 PAGE = PAGE.replace(
     '<div class="panel code-main"><div class="panel-head"><div><h2 id="codeSessionTitle">',
     '<div class="panel code-main"><div class="panel-head"><div><h2 id="codeSessionTitle">',
