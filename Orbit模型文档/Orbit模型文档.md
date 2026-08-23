@@ -1,12 +1,12 @@
 # Orbit模型文档
 
-这是电脑版 Orbit 的模型文档目录首页。该目录只描述独立 Orbit 的模型、
+这是 Orbit 架构层的模型文档目录首页。该目录只描述独立 Orbit 的两个底层模型、
 训练方式、初始化语义、OCA 研究边界和验证结果，不适用于 Orbit-XR 或
-Orbit-Phone。
+Orbit-Phone 或 Orbit-PC 的表层实现。
 
 ## 当前模型
 
-- `orbit-hybrid-moe-v1`：当前桌面 Orbit 的自研实验性字节级语言模型。
+- `orbit-hybrid-moe-v1`：Orbit 的自研实验性字节级语言模型，当前由 Orbit-PC 主线使用。
 - 300M、1B、3B、7B、14B、38B：配置档位；不是全部已经初始化或预训练的模型。
 - 训练第 1 次没有父模型时随机初始化；继续训练和微调加载父 checkpoint。
 
@@ -21,12 +21,19 @@ OCA 研究目录：
 
 `/Users/tim/Desktop/YUNSH/Orbit/orbit/OCA-Research/`
 
+## 两个底层项目文档
+
+- [OCA 项目文档](OCA-项目文档.md)
+- [`orbit-hybrid-moe-v1` 项目文档](orbit-hybrid-moe-v1-项目文档.md)
+
 ## 文档索引
 
-- [Orbit 自研模型架构技术报告](Orbit-架构技术报告.md)
 - [Orbit 模型架构说明](Orbit-模型架构说明.md)
 - [OCA 研究 README](../OCA-Research/README.md)
+- [Orbit 三层架构项目文档](../Orbit三层架构项目文档.md)
+
+详细 Orbit 架构技术报告属于内部保密资料，不放入公开 GitHub 仓库。
 
 每次模型实现、训练方式、OCA 研究状态或验证结论发生变化，都要同步更新
-本目录、电脑版 Orbit 项目文档和 Codex 的 Orbit 长期记忆；不能把未验证的
+本目录、Orbit-PC 主线项目文档和 Codex 的 Orbit 长期记忆；不能把未验证的
 实验结果写成已实现能力。

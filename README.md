@@ -39,18 +39,37 @@ Shared Embedding language-model head
 Predict the next UTF-8 byte
 ```
 
-The detailed model document and implementation boundary are in
-[`Orbit模型文档/Orbit-架构技术报告.md`](Orbit模型文档/Orbit-架构技术报告.md).
+The public model boundary is summarized in
+[`Orbit模型文档/Orbit模型文档.md`](Orbit模型文档/Orbit模型文档.md). Detailed
+internal architecture material is kept outside this public repository.
 
 ## Project boundaries
 
-This repository is for the **desktop Orbit** local training, inference, desktop
-app, models, and OpenAI-compatible API. **Orbit-XR** is the YUNSH OS embedded
-system integration and is documented separately in
+This is the public **Orbit** project. **Orbit-PC** is its desktop mainline for
+local training, inference, the desktop app, models, and OpenAI-compatible API.
+**Orbit-XR** is the YUNSH OS embedded system integration and is documented separately in
 [`Orbit-XR`](https://github.com/ljcccc999/yunsh-os); **Orbit-Phone** is the
-iPhone/HarmonyOS mobile project and is maintained separately. Their source,
+iPhone/HarmonyOS mobile surface. Orbit-XR and Orbit-Phone are used together
+with YUNSH OS and are maintained with its project boundaries. Their source,
 models, releases, logos, and hardware test results are not included in this
-desktop repository.
+public Orbit repository as one mixed implementation; each surface keeps its own
+project boundary.
+
+Orbit is organized into three layers: **Architecture** (OCA and
+`orbit-hybrid-moe-v1`), **Training** (data, parameters and validation), and
+**Surface** (Orbit-PC, Orbit-Phone and Orbit-XR).
+See the [three-layer project document](Orbit三层架构项目文档.md) for the file and
+project boundaries.
+
+## Orbit layers
+
+- **Architecture:** [OCA](Orbit模型文档/OCA-项目文档.md) (unimplemented world-model
+  research) and
+  [`orbit-hybrid-moe-v1`](Orbit模型文档/orbit-hybrid-moe-v1-项目文档.md).
+- **Training:** [training methods and parameter data](Orbit训练方式与参数数据.md).
+- **Surface:** **Orbit-PC** is the desktop mainline;
+  [Orbit-XR](https://github.com/ljcccc999/yunsh-os) and Orbit-Phone are
+  surfaces used together with YUNSH OS and maintained with the YUNSH OS project.
 
 ## What Orbit does
 
@@ -154,7 +173,7 @@ Open the **Training** page, choose a preset, optionally name the model or select
 
 - **Pretraining (from scratch)** starts with random Orbit weights. **Fine-tuning** can continue an already-trained local Orbit checkpoint or a downloaded, validated Orbit-compatible checkpoint; the Training page separates local and download sources and preserves the parent lineage. Orbit never silently changes one mode into the other.
 - Manual documents are shown with an estimated sample count based on UTF-8 corpus size and sequence length. The page warns about small datasets, overfitting, excessive context, unsafe memory pressure, and unrealistic pretraining goals, then suggests safer settings.
-- The four optimization choices recommend configuration from the actual token budget, model scale, device and memory. AI assistance accepts 1–10,000,000 samples per round; this is an operational safety cap, not a complete pretraining corpus. A manually entered count is never silently replaced by a recommendation. Generate larger corpora in reviewed rounds, and keep manual text and AI-generated text separately viewable. See `docs/300M-38B-全模型规模参数推荐.md`.
+- The four optimization choices recommend configuration from the actual token budget, model scale, device and memory. AI assistance accepts 1–10,000,000 samples per round; this is an operational safety cap, not a complete pretraining corpus. A manually entered count is never silently replaced by a recommendation. Generate larger corpora in reviewed rounds, and keep manual text and AI-generated text separately viewable. See [`Orbit训练方式与参数数据.md`](Orbit训练方式与参数数据.md) for the unified training reference.
 - After a reset, the advanced fields use one internally consistent **Balanced** profile instead of mixing a placeholder sample count with a different step recommendation. Manual advanced-parameter edits do not alter the four saved recommendations; selecting a profile again, or pressing **Apply this recommendation again**, restores that profile.
 
 Orbit reports three different units instead of treating them as interchangeable: a **sample** is one independently delimited document/task accepted from the teacher, a **training token** is one UTF-8 byte in the current `orbit-byte-v1` tokenizer, and a **step** is one optimizer update after batch and gradient accumulation. Character count, byte count, token count and optimizer steps are therefore shown separately. Teacher batches must contain exact sample boundaries, pass language/length/control-character checks, and survive exact and near-duplicate filtering; malformed batches are retried and only accepted samples increase progress. A deterministic 5% sample-level split is held out from weight updates. Structural checks do not independently prove factual correctness, so the UI labels generated facts as not independently reviewed.
