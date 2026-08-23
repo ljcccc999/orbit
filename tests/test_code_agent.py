@@ -108,6 +108,14 @@ def test_orbit_code_ui_contains_queue_progress_review_and_compact_tools():
     assert 'id="preventSleep"' in PAGE
     assert 'id="backgroundService"' in PAGE
     assert 'id="computerControl"' in PAGE
+    assert "允许操控鼠标和键盘" in PAGE
+    assert "释放本机 API 端口" in PAGE
+    assert "formatCodeElapsed" in PAGE
+    assert "用时 " in PAGE
+    assert "codeStageActionLabel" in PAGE
+    assert "code-stage-message" in PAGE
+    assert "编辑 ${counts.modified} 个文件" in PAGE
+    assert "搜索网页 ${web} 次" in PAGE
 
 
 def test_long_term_memory_keeps_completed_task_summaries_not_file_bodies(tmp_path):
@@ -142,6 +150,8 @@ def test_intelligence_levels_scale_execution_and_token_budgets(tmp_path):
     assert maximum["max_actions"] >= standard["max_actions"]
     assert "工作区" not in agent._system_prompt({"reasoning": "max"}, tmp_path)
     assert "只有没有可靠命令行/API 路径" in agent._system_prompt({"reasoning": "max"}, tmp_path)
+    assert "你的产品身份始终是 Orbit" in agent._system_prompt({"reasoning": "max"}, tmp_path)
+    assert "由 YUNSH 开发" in agent._system_prompt({"reasoning": "max"}, tmp_path)
 
 
 def test_plugins_are_local_toggleable_and_injected_as_context(tmp_path):

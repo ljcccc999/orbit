@@ -64,8 +64,7 @@ internal static class Program
             menu.Items.Add(new ToolStripMenuItem("Local API · 127.0.0.1:8765") { Enabled = false });
             menu.Items.Add("Unload Model", null, async (_, _) => await RunOrbitQuietlyAsync("unload"));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Exit App (Agent Keeps Running)", null, (_, _) => ExitApp());
-            menu.Items.Add("Stop Background Agent", null, async (_, _) => await StopAgentAsync());
+            menu.Items.Add("Quit Orbit (Stops Agent & API)", null, async (_, _) => await StopAgentAsync());
             return menu;
         }
 

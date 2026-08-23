@@ -148,8 +148,7 @@ function createTray() {
     { label: "Local API · 127.0.0.1:8765", enabled: false },
     { label: "Unload Model", click: () => runOrbitQuietly(["unload"]) },
     { type: "separator" },
-    { label: "Exit App (Agent Keeps Running)", click: quitApp },
-    { label: "Stop Background Agent", click: stopAgent },
+    { label: "Quit Orbit (Stops Agent & API)", click: stopAgent },
   ]));
   tray.on("double-click", showOrbit);
 }
