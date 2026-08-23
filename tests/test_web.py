@@ -268,6 +268,10 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert ".sidebar.mode-orbit>.nav button[data-page=\"community\"]" not in PAGE
     assert "orbitWorkspaceMode!=='code'" in PAGE
     assert "showPage('codeApi')" in PAGE
+    assert "调用了 ${tools.length} 个工具" in PAGE
+    assert "正在调用':'调用了" in PAGE
+    assert '#chat .chat-panel>.panel-head,#chat .inspector{display:none!important}' in PAGE
+    assert '#chat .composer{position:absolute' in PAGE
     assert "title.textContent=currentLang==='zh'?'训练历史':'Training history'" in PAGE
     assert "title.textContent=currentLang==='zh'?'Code 对话历史':'Code conversations'" in PAGE
 
