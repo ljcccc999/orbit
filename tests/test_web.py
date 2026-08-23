@@ -636,3 +636,15 @@ def test_partial_teacher_corpus_survives_failure_and_restart(tmp_path, monkeypat
     assert state["step"] == 5
     assert state["steps"] == 400
     assert "第一批训练内容" in restored.generated_training_content()["content"]
+
+
+def test_code_api_presets_cover_current_chinese_model_providers():
+    from orbit.web_ui import PAGE
+
+    for provider in ("Kimi 月之暗面", "智谱 GLM", "阿里云百炼 / Qwen", "MiniMax"):
+        assert provider in PAGE
+    for model in ("kimi-k3", "kimi-k2.7-code", "glm-5.1", "qwen3-coder-next", "MiniMax-M3"):
+        assert model in PAGE
+    assert "豆包 / 火山方舟" not in PAGE
+    assert "百度千帆 / ERNIE" not in PAGE
+    assert "自定义 OpenAI 兼容 API" in PAGE
