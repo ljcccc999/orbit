@@ -113,6 +113,11 @@ def test_orbit_code_ui_contains_queue_progress_review_and_compact_tools():
     assert "formatCodeElapsed" in PAGE
     assert "用时 " in PAGE
     assert "codeStageActionLabel" in PAGE
+    assert "codeRunningActionLabel" in PAGE
+    assert "正在查询文件/代码" in PAGE
+    assert "正在操作鼠标键盘" in PAGE
+    assert "codeToolKind" in PAGE
+    assert "tool-output-foot" in PAGE
     assert "code-stage-message" in PAGE
     assert "编辑 ${counts.modified} 个文件" in PAGE
     assert "搜索网页 ${web} 次" in PAGE
