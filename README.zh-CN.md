@@ -12,24 +12,35 @@
 
 Orbit 是一个本地 AI 工作室，把模型训练、checkpoint 管理、对话和 OpenAI 兼容 API 集中在同一个界面中。默认情况下，训练数据、模型和对话都保留在用户自己的电脑上。
 
-## Orbit 自研模型架构
+## 结构如下
 
-当前电脑版 Orbit 使用 **`orbit-hybrid-moe-v1`**，这是 Orbit 自研的实验性
-因果语言模型。它使用 256 类 UTF-8 字节级输入、DepthResidual 和 RMSNorm，
-自定义 `DeltaAttention` 与 `GatedMLA`，以及包含 8 个路由专家和 1 个共享
-专家的稀疏 `LatentMoE`；每个 token 采用 Top-2 路由，输入 Embedding 与输出
-头共享权重。当前 300M 配置约 2.84 亿参数；1B～38B 是配置模板，App 启动
-时不会把这些规模全部初始化或预训练。
+自研的 `orbit-hybrid-moe-v1` 架构：
 
-这是 Orbit 的原创自研架构，不加载其他命名模型的权重。完整的实现边界、
-初始化语义和可复现说明见
+```text
+Plain text
+  ↓
+UTF-8 字节输入
+  ↓
+256 字节词表 Embedding
+  ↓
+多层 Orbit Backbone
+  ├─ DepthResidual 深度残差
+  ├─ DeltaAttention 自定义注意力
+  ├─ GatedMLA 潜变量注意力
+  ├─ RMSNorm
+  └─ LatentMoE 稀疏专家网络
+      ├─ 8 个路由专家
+      ├─ 每个 token 激活 Top-2
+      ├─ 1 个共享专家
+      └─ SiTUGLU 门控前馈网络
+  ↓
+共享 Embedding 的语言模型输出头
+  ↓
+预测下一个 UTF-8 字节
+```
+
+完整模型说明和实现边界见
 [`Orbit模型文档/Orbit-架构技术报告.md`](Orbit模型文档/Orbit-架构技术报告.md)。
-
-Orbit 还包含独立的 **OCA（Orbit Continuum Architecture）** 研究分支，
-用于探索未来的世界模型架构。OCA 当前**尚未实现完成**，也没有证明已经
-理解真实物理世界。它“目标成为行业首个理解物理世界的架构”属于研究/产品
-目标和待验证主张，不是已经确认的行业事实；需要独立基准、对比实验和第三方
-验证。详见 [`OCA-Research/README.md`](OCA-Research/README.md)。
 
 ## 项目边界
 
