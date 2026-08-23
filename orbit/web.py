@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .config import OrbitConfig
 from .jobs import create_job_bundle
@@ -206,6 +206,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.code.public_settings())
             elif path == "/api/code/sessions":
                 self._json(200, self.server.runtime.code.list_sessions())
+            elif path == "/api/code/plugins":
+                self._json(200, self.server.runtime.code.list_plugins())
+            elif path.startswith("/api/code/sessions/") and path.endswith("/file"):
+                query = parse_qs(urlparse(self.path).query)
+                self._json(200, self.server.runtime.code.read_session_file(path.split("/")[4], str(query.get("path", [""])[0])))
             elif path.startswith("/api/code/sessions/"):
                 self._json(200, self.server.runtime.code.get(path.split("/")[4]))
             elif path.startswith("/api/community/export/"):
@@ -312,6 +317,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.code.delete_profile(str(data.get("profile_id", ""))))
             elif path == "/api/code/sessions":
                 self._json(202, self.server.runtime.code.start(data))
+            elif path == "/api/code/plugins/install":
+                self._json(201, self.server.runtime.code.install_plugin(data))
+            elif path == "/api/code/plugins/toggle":
+                self._json(200, self.server.runtime.code.toggle_plugin(str(data.get("plugin_id", "")), data.get("enabled") is True))
             elif path.startswith("/api/code/sessions/") and path.endswith("/approval"):
                 self._json(200, self.server.runtime.code.approve(path.split("/")[4], data.get("approved") is True))
             elif path.startswith("/api/code/sessions/") and path.endswith("/stop"):

@@ -39,6 +39,19 @@ Orbit is a local AI studio that puts model training, checkpoint management, chat
 - Creates multiple random, revocable API keys that can be restricted to one local model.
 - Lets local agents connect through an OpenAI-compatible configuration.
 
+## Orbit Code
+
+Use the product switch at the upper left to move between **Orbit**, **Training**, and **Orbit Code**. Orbit Code is a local-first coding agent that explains its plan before acting, reports new findings while it works, and ends with a result and verification summary.
+
+- The left rail puts **Plugins** directly below **New conversation**, keeps summarized conversation history, and shows a spinner beside running sessions. Completed sessions preserve an expandable execution record.
+- The composer accepts files, images, and voice input. While a task runs, a new message is queued by default; promoting it changes the message into immediate guidance without stopping the current task. Queued messages require confirmation before cancellation, and promoted guidance cannot be undone.
+- A liquid-glass progress pill shows completed and total steps, elapsed activity, and clickable green additions/red deletions. The right-side review drawer filters added, modified, and deleted files.
+- Execution history expands through three levels: stage summary, individual searches/commands/file edits, and full command output or line-level diff. A changed file can then open as a complete file in the right drawer; deleted files use the archived pre-change content.
+- **Intelligence** is a real execution budget, not only a label. Higher levels allow more agent turns, searches, checks, verification, time, and output tokens. The system keeps the stable instruction prefix and append-only task history to improve provider prompt-cache reuse.
+- Permission choices are **Ask for approval**, **Approve workspace actions**, and **Full access**. Destructive or out-of-scope actions still pass through the local permission flow. Orbit Code can also drive mouse and keyboard actions when the required local helper is available.
+- Model connections include local Orbit checkpoints, OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, Mistral, OpenRouter, and custom OpenAI-compatible endpoints. Multiple API profiles are stored locally with hidden keys. Providers that reject optional OpenAI fields receive one portable-core retry.
+- Local plugins are imported from a `plugin.json` manifest, enabled per device, and added to new-task context. Their actions remain subject to the same Orbit Code permissions.
+
 ## Requirements
 
 - More than 10 GB of system memory. More memory is required for larger presets.
