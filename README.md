@@ -12,6 +12,38 @@
 
 Orbit is a local AI studio that puts model training, checkpoint management, chat, and an OpenAI-compatible API in one interface. Training data, models, and conversations stay on the user's computer by default.
 
+## Orbit's self-developed architecture
+
+The current desktop Orbit model is **`orbit-hybrid-moe-v1`**, an experimental
+self-developed causal language model. It uses a 256-class UTF-8 byte-level
+input, DepthResidual and RMSNorm blocks, custom `DeltaAttention` and
+`GatedMLA`, a sparse `LatentMoE` with 8 routed experts plus 1 shared expert,
+Top-2 routing, and tied input/output embeddings. The current 300M configuration
+is about 284M parameters; the 1B–38B choices are configuration templates and
+are not all initialized or pretrained when the app starts.
+
+This is an original Orbit architecture and does not load weights from another
+named model. The detailed, reproducible boundary is in
+[`Orbit模型文档/Orbit-架构技术报告.md`](Orbit模型文档/Orbit-架构技术报告.md).
+
+Orbit also contains **OCA (Orbit Continuum Architecture)** as a separate
+self-developed research branch for a future world-model architecture. OCA is
+not implemented as a finished world model and has not been shown to understand
+the real physical world. Its goal of becoming an industry-first architecture
+for physical-world understanding is a research/product goal awaiting
+independent benchmarks and validation, not an established claim. See
+[`OCA-Research/README.md`](OCA-Research/README.md).
+
+## Project boundaries
+
+This repository is for the **desktop Orbit** local training, inference, desktop
+app, models, and OpenAI-compatible API. **Orbit-XR** is the YUNSH OS embedded
+system integration and is documented separately in
+[`Orbit-XR`](https://github.com/ljcccc999/yunsh-os); **Orbit-Phone** is the
+iPhone/HarmonyOS mobile project and is maintained separately. Their source,
+models, releases, logos, and hardware test results are not included in this
+desktop repository.
+
 ## What Orbit does
 
 - Opens a draggable desktop workspace with separate Chat, Models, Training, Training History, and API areas.
