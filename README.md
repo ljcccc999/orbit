@@ -102,6 +102,8 @@ project boundaries.
 
 Use the product switch at the upper left to move between **Orbit**, **Training**, and **Orbit Code**. Orbit Code is a local-first coding agent that explains its plan before acting, reports new findings while it works, and ends with a result and verification summary.
 
+The desktop shell follows one contextual workspace model: Orbit shows Orbit conversations, Training shows training history, and Orbit Code shows Code conversations. The sidebar, back, and forward controls share one translucent navigation group; the right side is one continuously scrollable conversation surface with the composer pinned at the bottom. Execution plans, live actions, elapsed time, file deltas, tool output, and the final summary stay inside the conversation instead of occupying a separate dashboard above it. The model is shown in the lower-right composer; opening it reveals the Intelligence slider, while Advanced contains the exact model and speed controls.
+
 - The left rail puts **Plugins** directly below **New conversation**, keeps summarized conversation history, and shows a spinner beside running sessions. Completed sessions preserve an expandable execution record.
 - The composer accepts files, images, and voice input. While a task runs, a new message is queued by default; promoting it changes the message into immediate guidance without stopping the current task. Queued messages require confirmation before cancellation, and promoted guidance cannot be undone.
 - A liquid-glass progress pill shows completed and total steps, elapsed activity, and clickable green additions/red deletions. The right-side review drawer filters added, modified, and deleted files.

@@ -250,6 +250,21 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert "/api/training/recommendation" in PAGE
 
 
+def test_orbit_code_uses_one_scrollable_conversation_shell():
+    assert 'id="toggleSidebar"' in PAGE
+    assert 'id="navigateBack"' in PAGE
+    assert 'id="navigateForward"' in PAGE
+    assert 'sidebar-top-controls' not in PAGE.split("<body>", 1)[1]
+    assert '#content.code-page-active{overflow:hidden!important' in PAGE
+    assert '#code .code-timeline{min-height:0;overflow-x:hidden;overflow-y:auto' in PAGE
+    assert '.code-process-bar,.code-process-overview,.current-activity{display:none!important}' in PAGE
+    assert 'class="liquid-pill code-conversation-status"' in PAGE
+    assert 'class="code-process-inline" hidden' in PAGE
+    assert 'id="composerAdvancedToggle"' in PAGE
+    assert 'const codeSourceField=' in PAGE
+    assert "$('codeAdvanced').textContent=modelText" in PAGE
+
+
 def test_external_base_models_are_not_allowed_for_from_scratch_training(tmp_path):
     runtime = OrbitRuntime(tmp_path)
     recommendation = runtime.training_recommendation({

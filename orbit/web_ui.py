@@ -147,6 +147,197 @@ PAGE = PAGE.replace(
     1,
 )
 
+# Orbit Code desktop shell cleanup: one sidebar, one conversation scroll surface,
+# and one translucent three-button navigation group.  Execution history belongs
+# to the assistant message flow instead of a second strip above the conversation.
+PAGE = PAGE.replace(
+    "</style>",
+    r"""
+.app{transition:grid-template-columns .24s cubic-bezier(.22,.8,.2,1)}
+.app.sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)}
+.app.sidebar-collapsed>.sidebar{opacity:0;transform:translateX(-18px);pointer-events:none}
+.sidebar{min-height:0;overflow:hidden;transition:opacity .18s ease,transform .24s cubic-bezier(.22,.8,.2,1)}
+.toolbar{gap:14px;padding:0 18px;background:rgba(248,250,253,.62);backdrop-filter:blur(28px) saturate(175%);border-bottom:0;box-shadow:inset 0 -1px rgba(38,52,76,.07)}
+.toolbar-nav{display:flex;align-items:center;gap:5px;padding:4px;border:1px solid rgba(255,255,255,.92);border-radius:13px;background:rgba(255,255,255,.55);backdrop-filter:blur(24px) saturate(180%);box-shadow:0 8px 24px rgba(28,40,65,.08),inset 0 1px rgba(255,255,255,.96);-webkit-app-region:no-drag}
+.toolbar-nav button{display:grid;place-items:center;width:31px;height:29px;padding:0;border:0;border-radius:9px;background:transparent;color:#485366;font-size:18px;line-height:1;transition:background .14s ease,transform .1s ease,color .14s ease}
+.toolbar-nav button:hover:not(:disabled){background:rgba(255,255,255,.82);color:var(--ink)}
+.toolbar-nav button:active:not(:disabled){transform:scale(.94)}
+.toolbar-nav button:disabled{opacity:.28;cursor:default}
+.sidebar-symbol{position:relative;width:16px;height:14px;border:1.5px solid currentColor;border-radius:4px}
+.sidebar-symbol:before{content:'';position:absolute;top:0;bottom:0;left:5px;width:1px;background:currentColor;opacity:.7}
+.toolbar-title{min-width:0}.toolbar-title .trail{display:none}.toolbar-title h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650}
+.toolbar-right{display:none!important}
+#content.code-page-active{overflow:hidden!important;padding:0!important}
+#code.page.active{height:100%;min-height:0;overflow:hidden}
+#code .code-layout{display:block;height:100%;min-height:0}
+#code .code-main{height:100%;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto;border:0;border-radius:0;background:transparent;backdrop-filter:none;box-shadow:none;overflow:hidden}
+#code .code-main>.panel-head{display:none}
+#code .code-timeline{min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable;padding:28px max(28px,calc((100% - 900px)/2)) 190px;scroll-behavior:smooth}
+#code .code-composer-zone{position:absolute;left:max(24px,calc((100% - 920px)/2));right:max(24px,calc((100% - 920px)/2));bottom:18px}
+#code .code-composer{background:rgba(250,251,253,.72);border-color:rgba(255,255,255,.98);backdrop-filter:blur(30px) saturate(185%);box-shadow:0 18px 45px rgba(27,39,63,.15),inset 0 1px rgba(255,255,255,.98)}
+#codeProgress{display:none!important}
+.code-process-bar,.code-process-overview,.current-activity{display:none!important}
+.code-conversation-status{display:flex;align-items:center;gap:8px;width:max-content;max-width:100%;margin:8px 0 16px;padding:8px 12px}
+.code-conversation-status .step-ring{flex:0 0 auto}
+.code-conversation-status .change-inline{border:0;background:transparent;padding:2px 4px;font-size:12px}
+.code-conversation-status .change-inline.del{color:var(--red)}
+.code-conversation-status .change-inline.add{color:var(--green)}
+.code-elapsed{display:flex;align-items:center;gap:7px;margin:4px 0 16px;padding:5px 0;border:0;background:transparent;color:var(--muted);font-size:13px;font-weight:650}
+.code-final-summary{font-size:15px;line-height:1.72;white-space:pre-wrap;color:var(--ink);margin-bottom:12px}
+.code-process-inline[hidden]{display:none}.code-process-inline{padding-top:5px}
+.code-rail,.code-rail[hidden]{display:none!important}
+.sidebar.code-mode{overflow-y:auto;overscroll-behavior:contain}
+.sidebar .code-rail.sidebar-mounted:not([hidden]){display:flex!important;flex:0 0 auto;margin:7px 0 12px;border:0;border-radius:0;background:transparent;backdrop-filter:none;box-shadow:none;overflow:visible}
+.sidebar .code-rail.sidebar-mounted .panel-head{padding:10px 8px;border:0;display:grid;gap:8px}
+.sidebar .code-rail.sidebar-mounted .panel-head p{display:none}
+.sidebar .code-rail.sidebar-mounted .panel-head h2{font-size:13px}
+.sidebar .code-rail.sidebar-mounted #newCodeSession{width:100%;background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.9)}
+.sidebar .code-rail.sidebar-mounted .code-plugin-entry{margin:0 8px 8px;background:rgba(255,255,255,.38)}
+.sidebar .code-rail.sidebar-mounted .code-rail-scroll{padding:4px 8px 8px;overflow:visible}
+.sidebar.code-mode>.nav{order:0}.sidebar.code-mode>.code-rail{order:1}.sidebar.code-mode>.side-bottom{order:2}
+.sidebar.code-mode .nav button[data-page="code"]{display:none}
+.sidebar.code-mode>.sidebar-history{display:flex}
+.sidebar.code-mode .code-rail.sidebar-mounted .panel-head,.sidebar.code-mode .code-rail.sidebar-mounted .code-plugin-entry,.sidebar.code-mode .code-rail.sidebar-mounted .code-rail-scroll>.field,.sidebar.code-mode .code-rail.sidebar-mounted .context-options,.sidebar.code-mode .code-rail.sidebar-mounted .divider{display:none!important}
+.sidebar.code-mode .code-rail.sidebar-mounted .code-rail-scroll{display:block;padding:4px 4px 12px}
+.sidebar.code-mode .code-history-title{padding:3px 8px;margin:0 0 5px}
+.sidebar .nav button[data-page="train"],.sidebar .nav button[data-page="runs"]{display:none!important}
+.sidebar .code-rail.sidebar-mounted{display:none!important}
+@media(max-width:900px){#code .code-timeline{padding:20px 16px 180px}#code .code-composer-zone{left:10px;right:10px}.toolbar{padding:0 10px}.app.sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)}}
+@media(prefers-reduced-transparency:reduce){.toolbar,.toolbar-nav,#code .code-composer{background:#f8f9fb;backdrop-filter:none;border-color:#aeb7c5}}
+@media(prefers-contrast:more){.toolbar-nav,#code .code-composer{border-color:#596578}}
+@media(prefers-reduced-motion:reduce){.app,.sidebar,.toolbar-nav button{transition:none}}
+""" + "</style>",
+    1,
+)
+
+PAGE = PAGE.replace(
+    '<header class="toolbar"><div><div class="trail">Orbit / <span id="trail">Chat</span></div><h1 id="pageTitle">Chat</h1></div>',
+    '<header class="toolbar"><div class="toolbar-nav" aria-label="Navigation"><button id="toggleSidebar" title="显示或隐藏侧栏"><span class="sidebar-symbol"></span></button><button id="navigateBack" title="返回" aria-label="返回">‹</button><button id="navigateForward" title="前进" aria-label="前进">›</button></div><div class="toolbar-title"><div class="trail">Orbit / <span id="trail">Chat</span></div><h1 id="pageTitle">Chat</h1></div>',
+    1,
+)
+
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+const orbitApp=document.querySelector('.app'),orbitSidebar=document.querySelector('.sidebar'),orbitContent=$('content'),codeRail=document.querySelector('#code .code-rail');
+if(codeRail){codeRail.classList.add('sidebar-mounted');orbitSidebar.insertBefore(codeRail,orbitSidebar.querySelector('.side-bottom'))}
+let orbitPageHistory=['chat'],orbitPageIndex=0,orbitNavigatingHistory=false;
+function updateOrbitNavigation(){const back=$('navigateBack'),forward=$('navigateForward');if(back)back.disabled=orbitPageIndex<=0;if(forward)forward.disabled=orbitPageIndex>=orbitPageHistory.length-1}
+const _orbitUnifiedShowPage=showPage;
+showPage=function(name){
+  if(!orbitNavigatingHistory&&orbitPageHistory[orbitPageIndex]!==name){orbitPageHistory=orbitPageHistory.slice(0,orbitPageIndex+1);orbitPageHistory.push(name);orbitPageIndex=orbitPageHistory.length-1}
+  _orbitUnifiedShowPage(name);
+  const isCode=name==='code';
+  orbitSidebar.classList.toggle('code-mode',isCode);
+  if(codeRail)codeRail.hidden=!isCode;
+  orbitContent.classList.toggle('code-page-active',isCode);
+  updateOrbitNavigation();
+};
+document.querySelectorAll('[data-page]').forEach(button=>button.onclick=()=>showPage(button.dataset.page));
+document.querySelectorAll('[data-product-page]').forEach(button=>button.onclick=()=>showPage(button.dataset.productPage));
+$('toggleSidebar').onclick=()=>orbitApp.classList.toggle('sidebar-collapsed');
+$('navigateBack').onclick=()=>{if(orbitPageIndex<=0)return;orbitNavigatingHistory=true;orbitPageIndex--;showPage(orbitPageHistory[orbitPageIndex]);orbitNavigatingHistory=false;updateOrbitNavigation()};
+$('navigateForward').onclick=()=>{if(orbitPageIndex>=orbitPageHistory.length-1)return;orbitNavigatingHistory=true;orbitPageIndex++;showPage(orbitPageHistory[orbitPageIndex]);orbitNavigatingHistory=false;updateOrbitNavigation()};
+function codeInlineProgress(row){const p=row.progress||{},c=row.changes||{},total=Math.max(p.total||0,p.completed||0),deg=total?Math.min(360,(p.completed||0)/total*360):0;return`<div class="liquid-pill code-conversation-status"><span class="step-ring" style="--progress:${deg}deg"></span><b>${p.completed||0}/${total}</b><button class="change-inline del" onclick="openReview('deleted')">−${c.deletions||0} · ${c.files_changed||0} 文件</button><button class="change-inline add" onclick="openReview('added')">+${c.additions||0} · ${c.files_changed||0} 文件</button></div>`}
+function toggleInlineCodeProcess(button){const body=button.parentElement.querySelector('.code-process-inline'),expanded=!body.hidden;body.hidden=expanded;button.setAttribute('aria-expanded',String(!expanded));button.lastElementChild.textContent=expanded?'›':'⌄'}
+renderCodeProcessState=function(){const timeline=$('codeTimeline');if(timeline)timeline.classList.remove('process-collapsed')};
+const _orbitConversationRenderSession=renderCodeSession;
+renderCodeSession=function(row){
+  const timeline=$('codeTimeline'),wasNearBottom=timeline.scrollHeight-timeline.scrollTop-timeline.clientHeight<110;
+  _orbitConversationRenderSession(row);
+  const running=codeIsRunning(row),events=row.events||[],summary=[...events].reverse().find(e=>e.kind==='assistant'&&e.phase==='summary'),full=renderThreeLevelCodeTimeline(row)||'<div class="code-empty"><div><b>正在开始</b><span>Orbit Code 正在理解任务。</span></div></div>';
+  if(running){timeline.innerHTML=full+codeInlineProgress(row)}else{
+    const summaryHtml=summary?`<div class="code-final-summary">${esc(summary.detail||summary.title||'')}</div>`:'';
+    timeline.innerHTML=`<button class="code-elapsed" aria-expanded="false" onclick="toggleInlineCodeProcess(this)"><span>${currentLang==='zh'?'用时 ':'Time '}${formatCodeElapsed(row.duration_ms||0)}</span><span>›</span></button>${summaryHtml}<div class="code-process-inline" hidden>${full}${codeInlineProgress(row)}</div>`;
+  }
+  timeline.classList.remove('process-collapsed');
+  if(running&&wasNearBottom)requestAnimationFrame(()=>{timeline.scrollTop=timeline.scrollHeight});
+};
+const _orbitUnifiedNewCodeSession=newCodeSession;
+newCodeSession=function(){_orbitUnifiedNewCodeSession();$('codeTimeline').classList.remove('process-collapsed')};
+$('newCodeSession').onclick=newCodeSession;
+codeRail.hidden=true;updateOrbitNavigation();
+const primaryChatButton=orbitSidebar.querySelector('.nav button[data-page="chat"]'),primaryPluginButton=orbitSidebar.querySelector('.nav button[data-page="plugins"]');
+if(primaryChatButton)primaryChatButton.addEventListener('click',event=>{if(!orbitSidebar.classList.contains('code-mode'))return;event.preventDefault();event.stopImmediatePropagation();newCodeSession()},{capture:true});
+if(primaryPluginButton)primaryPluginButton.addEventListener('click',event=>{if(!orbitSidebar.classList.contains('code-mode'))return;event.preventDefault();event.stopImmediatePropagation();$('openCodePlugins').click()},{capture:true});
+'''+"</script></body></html>",
+    1,
+)
+
+PAGE = PAGE.replace(
+    "</style>",
+    r"""
+#codeAdvanced{width:auto;min-width:148px;padding:0 12px;border-radius:999px;font-size:12px;gap:6px;grid-auto-flow:column;background:rgba(85,96,116,.07)}
+#codeAdvanced:after{content:'⌄';color:var(--muted);font-size:11px}
+#codeAdvancedPanel{left:auto;right:8px;bottom:52px;width:min(390px,calc(100vw - 70px));padding:8px;border-radius:18px;background:rgba(248,249,252,.86);backdrop-filter:blur(34px) saturate(185%);box-shadow:0 22px 60px rgba(22,31,49,.2),inset 0 1px rgba(255,255,255,.95)}
+.composer-settings-list{display:grid;gap:2px;margin-top:4px;padding-top:5px;border-top:1px solid var(--line)}.composer-settings-list[hidden]{display:none}.composer-setting{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:12px;padding:9px 10px;border-radius:11px}.composer-setting:hover{background:rgba(255,255,255,.62)}.composer-setting>span{font-weight:650}.composer-setting select{border:0;background:transparent;padding:5px 22px 5px 5px;text-align:right;box-shadow:none}.composer-reasoning{padding:10px}.composer-reasoning .field>label{display:flex;justify-content:space-between}.composer-reasoning .help{margin-top:6px}.composer-advanced-toggle{display:flex;justify-content:space-between;width:100%;padding:9px 10px;border:0;border-radius:11px;background:transparent;color:var(--muted);font-weight:650;text-align:left}.composer-advanced-toggle:hover{background:rgba(255,255,255,.62);color:var(--ink)}.agent-event.user{display:flex;justify-content:flex-end;padding-left:72px}.agent-event.user:before,.agent-event.user:after{display:none}.agent-event.user .event-card{max-width:82%;border:0;border-radius:18px 18px 5px 18px;background:rgba(71,83,104,.1)}.agent-event.user .event-card>summary{display:none}.agent-event.user .event-detail{padding:10px 14px;color:var(--ink);font-size:14px;line-height:1.55}.code-stage-message{max-width:850px}.code-final-summary{max-width:850px}
+""" + "</style>",
+    1,
+)
+
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+const codeAdvancedPanel=$('codeAdvancedPanel'),reasoningField=$('codeReasoning')?.closest('.field');
+if(codeAdvancedPanel){
+  const originalModel=$('codeModel')?.closest('.field'),originalSpeed=$('codeSpeed')?.closest('.field');
+  codeAdvancedPanel.innerHTML='<div class="composer-reasoning" id="composerReasoning"></div><button class="composer-advanced-toggle" id="composerAdvancedToggle"><span>高级</span><span>›</span></button><div class="composer-settings-list" id="composerSettingsList" hidden></div>';
+  const list=$('composerSettingsList');
+  if(originalModel){originalModel.className='composer-setting';originalModel.querySelector('label').outerHTML='<span>模型</span>';list.appendChild(originalModel)}
+  if(originalSpeed){originalSpeed.className='composer-setting';originalSpeed.querySelector('label').outerHTML='<span>速度</span>';list.appendChild(originalSpeed)}
+  if(reasoningField)$('composerReasoning').appendChild(reasoningField);
+  $('composerAdvancedToggle').onclick=event=>{event.stopPropagation();const hidden=list.hidden;list.hidden=!hidden;$('composerAdvancedToggle').lastElementChild.textContent=hidden?'⌄':'›'};
+}
+const codeSourceField=$('codeSource')?.closest('.field');if(codeSourceField)codeSourceField.hidden=true;
+function updateComposerModelLabel(){const model=$('codeModel');if(!model)return;const modelText=(model.selectedOptions[0]?.textContent||'Orbit').replace(/ · 自动选择/,'');$('codeAdvanced').textContent=modelText}
+const _orbitComposerSyncSliders=syncCodeSliders;syncCodeSliders=function(){_orbitComposerSyncSliders();updateComposerModelLabel()};
+const _orbitComposerRefreshSettings=refreshCodeSettings;refreshCodeSettings=async function(){await _orbitComposerRefreshSettings();updateComposerModelLabel()};
+$('codeModel').onchange=()=>{$('codeSource').value=$('codeModel').value;persistCodeControls();updateComposerModelLabel()};
+$('codeReasoning').oninput=()=>{syncCodeSliders();persistCodeControls();updateComposerModelLabel()};
+const _orbitUserBubbleRenderEvent=renderCodeEvent;renderCodeEvent=function(event,row){if(event.kind==='user')return`<div class="agent-event user"><details class="event-card" open><div class="event-detail">${esc(event.detail||event.title||'')}</div></details></div>`;return _orbitUserBubbleRenderEvent(event,row)};
+const _orbitConversationPageTitleRender=renderCodeSession;renderCodeSession=function(row){_orbitConversationPageTitleRender(row);$('pageTitle').textContent=row.title||'Orbit Code'};
+updateComposerModelLabel();
+''' + "</script></body></html>",
+    1,
+)
+
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+let orbitWorkspaceMode='orbit';
+if(codeRail){codeRail.hidden=true;document.body.appendChild(codeRail)}
+function orbitModeForPage(name){return name==='code'||name==='codeApi'?'code':name==='train'||name==='runs'?'training':'orbit'}
+function orbitWorkspaceLabel(mode){return mode==='code'?'Orbit Code':mode==='training'?(currentLang==='zh'?'训练':'Training'):'Orbit'}
+async function refreshWorkspaceHistory(){
+  const target=$('sidebarConversationList'),title=orbitSidebar.querySelector('.sidebar-history-title');if(!target||!title)return;
+  if(orbitWorkspaceMode==='orbit'){title.textContent=currentLang==='zh'?'最近对话':'Recent chats';await refreshConversations();return}
+  if(orbitWorkspaceMode==='training'){
+    title.textContent=currentLang==='zh'?'训练历史':'Training history';
+    try{const rows=await request('/api/training/runs');target.innerHTML=rows.length?rows.map(r=>`<button class="run-item ${currentRun===r.id?'active':''}" onclick="showPage('runs');showRun('${eid(r.id)}')"><b>${esc(r.model_name||r.model_id)}</b><span>${esc(r.created_at)} · ${esc(r.status)}</span></button>`).join(''):`<div class="help">${t('noRuns')}</div>`}catch(e){target.innerHTML=`<div class="help">${esc(e.message)}</div>`}return
+  }
+  title.textContent=currentLang==='zh'?'Code 对话历史':'Code conversations';
+  try{const rows=await request('/api/code/sessions');target.innerHTML=rows.length?rows.map(r=>`<button class="run-item ${currentCodeSession===r.id?'active':''}" onclick="showPage('code');openCodeSession('${r.id}')"><span class="session-title"><b>${esc(r.title||'Orbit Code')}</b>${codeIsRunning(r)?'<i class="session-spinner" aria-label="正在运行"></i>':''}</span><span>${esc(r.status)} · ${formatCodeTime(r.duration_ms||0)}</span></button>`).join(''):'<div class="help">还没有 Orbit Code 对话。</div>'}catch(e){target.innerHTML=`<div class="help">${esc(e.message)}</div>`}
+}
+function setOrbitWorkspaceMode(mode){
+  orbitWorkspaceMode=mode;
+  if(codeRail)codeRail.hidden=true;
+  $('productSwitch').firstElementChild.textContent=orbitWorkspaceLabel(mode);
+  const primary=orbitSidebar.querySelector('.nav button[data-page="chat"] span:last-child');if(primary)primary.textContent=mode==='training'?(currentLang==='zh'?'新训练':'New training'):(currentLang==='zh'?'新对话':'New chat');
+  orbitSidebar.classList.toggle('code-mode',mode==='code');
+  refreshWorkspaceHistory();
+}
+const _orbitContextualShowPage=showPage;showPage=function(name){_orbitContextualShowPage(name);setOrbitWorkspaceMode(orbitModeForPage(name))};
+document.querySelectorAll('[data-page]').forEach(button=>button.onclick=()=>showPage(button.dataset.page));
+document.querySelectorAll('[data-product-page]').forEach(button=>button.onclick=()=>showPage(button.dataset.productPage));
+if(primaryChatButton)primaryChatButton.addEventListener('click',event=>{if(orbitWorkspaceMode!=='training')return;event.preventDefault();event.stopImmediatePropagation();showPage('train');if(typeof resetTrainingForm==='function')resetTrainingForm()},{capture:true});
+const _orbitContextRefreshConversations=refreshConversations;refreshConversations=async function(){await _orbitContextRefreshConversations();if(orbitWorkspaceMode!=='orbit')await refreshWorkspaceHistory()};
+const _orbitContextRefreshRuns=refreshRuns;refreshRuns=async function(){await _orbitContextRefreshRuns();if(orbitWorkspaceMode==='training')await refreshWorkspaceHistory()};
+const _orbitContextRefreshCodeSessions=refreshCodeSessions;refreshCodeSessions=async function(){await _orbitContextRefreshCodeSessions();if(orbitWorkspaceMode==='code')await refreshWorkspaceHistory()};
+setOrbitWorkspaceMode(orbitModeForPage(document.querySelector('.page.active')?.id||'chat'));
+''' + "</script></body></html>",
+    1,
+)
+
 PAGE = PAGE.replace(
     "</style>",
     ".current-activity{display:flex;align-items:center;gap:9px;min-height:38px;padding:8px 18px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.34);color:var(--muted);font-size:12px}.current-activity[hidden]{display:none}.activity-orbit{width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:orbitActivitySpin 1s linear infinite}.activity-detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.thinking .event-card{border:0;background:transparent}.thinking .event-card>summary{padding-left:0;color:var(--muted)}@keyframes orbitActivitySpin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.activity-orbit{animation:none;border-right-color:rgba(33,104,243,.25)}}</style>",
@@ -397,7 +588,7 @@ PAGE = PAGE.replace(
 )
 PAGE = PAGE.replace(
     '<aside class="sidebar"><div class="brand">',
-    '<aside class="sidebar"><div class="sidebar-top-controls"><button data-side-action="menu" title="Menu">☰</button><button data-side-action="new" title="New chat">＋</button><button data-side-action="search" title="Search">⌕</button></div><div class="brand">',
+    '<aside class="sidebar"><div class="brand">',
 )
 PAGE = PAGE.replace(
     '</button></nav><div class="side-bottom">',
