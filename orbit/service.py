@@ -167,6 +167,24 @@ def start() -> None:
         raise RuntimeError("后台服务目前支持 macOS 和 Linux")
 
 
+def set_autostart(enabled: bool) -> None:
+    """Toggle login-time service startup without stopping the live agent."""
+    system = platform.system()
+    if system == "Darwin":
+        path = _mac_plist()
+        if enabled and not path.exists():
+            install(start=False)
+        _run(["launchctl", "enable" if enabled else "disable", f"{_mac_domain()}/{LABEL}"], check=False)
+    elif system == "Linux":
+        if enabled and not _linux_unit().exists():
+            install(start=False)
+        _run(["systemctl", "--user", "enable" if enabled else "disable", "orbit.service"], check=False)
+    elif system == "Windows":
+        if enabled and not _windows_task_xml().exists():
+            install(start=False)
+        _run(["schtasks", "/Change", "/TN", "OrbitLocalAI", "/ENABLE" if enabled else "/DISABLE"], check=False)
+
+
 def stop() -> None:
     if platform.system() == "Darwin":
         _run(["launchctl", "bootout", _mac_domain(), str(_mac_plist())], check=False)

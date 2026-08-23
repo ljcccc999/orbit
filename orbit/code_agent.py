@@ -86,6 +86,7 @@ class OrbitCodeAgent:
             "profiles": [],
             "local_context": True,
             "long_term_memory": True,
+            "computer_control": False,
             "enabled_plugins": [],
         }
 
@@ -129,7 +130,7 @@ class OrbitCodeAgent:
         for key in ("provider", "base_url", "model", "api_format", "reasoning", "speed", "permission", "workspace", "capability", "active_profile_id"):
             if key in payload:
                 values[key] = str(payload[key]).strip()
-        for key in ("local_context", "long_term_memory"):
+        for key in ("local_context", "long_term_memory", "computer_control"):
             if key in payload:
                 values[key] = bool(payload[key])
         if str(payload.get("api_key", "")).strip():
@@ -184,6 +185,16 @@ class OrbitCodeAgent:
             self._api_endpoint(values["base_url"], str(values.get("api_format", "openai")))
             if not values["model"] or not values["api_key"]:
                 raise ValueError("请选择已保存的 API 配置")
+        temporary = self.settings_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, self.settings_path)
+        return self.public_settings()
+
+    def set_computer_control(self, enabled: bool) -> dict[str, Any]:
+        """Synchronize the host permission without revalidating API profiles."""
+        values = self._load_settings()
+        values["computer_control"] = bool(enabled)
         temporary = self.settings_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.chmod(temporary, 0o600)
@@ -335,7 +346,7 @@ class OrbitCodeAgent:
         for key in ("provider", "model", "reasoning", "speed", "permission", "workspace"):
             if key in payload and str(payload[key]).strip():
                 settings[key] = str(payload[key]).strip()
-        for key in ("local_context", "long_term_memory"):
+        for key in ("local_context", "long_term_memory", "computer_control"):
             if key in payload:
                 settings[key] = bool(payload[key])
         if "capability" in payload:
@@ -361,7 +372,7 @@ class OrbitCodeAgent:
             "duration_ms": 0,
             "progress": {"completed": 0, "total": 0},
             "changes": {"files": [], "files_changed": 0, "additions": 0, "deletions": 0},
-            "settings": {key: settings.get(key) for key in ("provider", "model", "reasoning", "speed", "permission", "workspace", "capability", "active_profile_id", "api_format", "local_context", "long_term_memory")},
+            "settings": {key: settings.get(key) for key in ("provider", "model", "reasoning", "speed", "permission", "workspace", "capability", "active_profile_id", "api_format", "local_context", "long_term_memory", "computer_control")},
             "attachments": self._save_attachments(session_id, payload.get("attachments", [])),
             "events": [],
             "history": [],
@@ -797,7 +808,7 @@ class OrbitCodeAgent:
 必须按计划、执行、观察、更新、验证、总结循环完成任务。第一轮先用简洁自然语言告诉用户你准备怎么做，然后给出工具动作。执行一部分或发现新信息后，用 update 阶段说明。完成时用 summary 总结实际结果和验证，不得虚构成功。
 你的每次回复必须是一个 JSON 对象，不能有 Markdown 围栏：
 {{"phase":"plan|update|summary","message":"给用户看的中文说明","actions":[{{"tool":"list_files|read_file|search|web_search|apply_patch|shell|computer","path":"相对路径","query":"搜索词","patch":"unified diff","command":"命令","action":"move|click|double_click|right_click|drag|type|key|hotkey","x":0,"y":0,"to_x":0,"to_y":0,"text":"输入文字","key":"enter","keys":["cmd"],"summary":"动作说明"}}],"done":false}}
-规则：优先 list_files/search/read_file 后再改；apply_patch 使用标准 unified diff；shell 仅用于必要命令和测试；computer 只在用户要求操纵本机界面时使用，坐标和输入必须明确；每次 actions 最多 8 个；没有工具要运行或任务完成时 done=true。不要输出隐藏思维链，只给计划、发现、动作说明和结果。"""
+规则：优先 list_files/search/read_file 后再改；apply_patch 使用标准 unified diff；优先使用可复现的文件 API、命令行和 Shell，只有没有可靠命令行/API 路径且完成任务确实需要图形界面时才使用 computer；computer 坐标和输入必须明确；每次 actions 最多 8 个；没有工具要运行或任务完成时 done=true。不要输出隐藏思维链，只给计划、发现、动作说明和结果。"""
 
     @staticmethod
     def _initial_prompt(prompt: str, context: str, memory: str, plugins: str, attachments: list[dict[str, Any]], intelligence: dict[str, Any]) -> str:
@@ -993,6 +1004,8 @@ class OrbitCodeAgent:
         )
         started = time.monotonic()
         try:
+            if tool == "computer" and settings.get("computer_control") is not True:
+                raise PermissionError("设置中尚未允许 Orbit Code 操控电脑")
             output = self._execute(action, workspace, permission)
             result = {"tool": tool, "ok": True, "output": output[-20_000:], "duration_ms": _elapsed(started), "event_id": event["id"]}
             event.update(detail=result["output"] or "完成", status="completed", duration_ms=result["duration_ms"])

@@ -64,7 +64,8 @@ internal static class Program
             menu.Items.Add(new ToolStripMenuItem("Local API · 127.0.0.1:8765") { Enabled = false });
             menu.Items.Add("Unload Model", null, async (_, _) => await RunOrbitQuietlyAsync("unload"));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Exit Orbit", null, async (_, _) => await ExitOrbitAsync());
+            menu.Items.Add("Exit App (Agent Keeps Running)", null, (_, _) => ExitApp());
+            menu.Items.Add("Stop Background Agent", null, async (_, _) => await StopAgentAsync());
             return menu;
         }
 
@@ -159,14 +160,19 @@ internal static class Program
             try { await RunAsync(orbit, arguments); } catch { }
         }
 
-        private async Task ExitOrbitAsync()
+        private void ExitApp()
         {
             UnregisterStartup();
-            await RunOrbitQuietlyAsync("service uninstall");
             tray.Visible = false;
             explicitExit = true;
             Close();
             Application.Exit();
+        }
+
+        private async Task StopAgentAsync()
+        {
+            await RunOrbitQuietlyAsync("service uninstall");
+            ExitApp();
         }
 
         private static string ExtractInstaller()

@@ -3,7 +3,12 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
+import platform
+import shutil
 import socketserver
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -20,6 +25,7 @@ from .jobs import create_job_bundle
 from .runtime import OrbitRuntime
 from .training_config import TrainingConfig
 from . import updater
+from . import service
 from .web_ui import PAGE
 
 PAGE = PAGE.replace("system.active_model||t('idle')", "system.active_model_name||system.active_model||t('idle')")
@@ -28,6 +34,32 @@ PAGE = PAGE.replace("system.active_model||t('inactive')", "system.active_model_n
 
 
 MAX_REQUEST_BYTES = 64 * 1024 * 1024
+
+
+class SleepInhibitor:
+    def __init__(self) -> None:
+        self.process: subprocess.Popen[bytes] | None = None
+
+    def set_enabled(self, enabled: bool) -> None:
+        if enabled and self.process is None:
+            system = platform.system()
+            if system == "Darwin" and Path("/usr/bin/caffeinate").is_file():
+                command = ["/usr/bin/caffeinate", "-dimsu", "-w", str(os.getpid())]
+            elif system == "Linux" and shutil.which("systemd-inhibit") and shutil.which("tail"):
+                command = [shutil.which("systemd-inhibit") or "systemd-inhibit", "--what=sleep:idle", "--why=Orbit background agent", "--mode=block", shutil.which("tail") or "tail", "-f", "/dev/null"]
+            elif system == "Windows":
+                code = "import ctypes,time; ctypes.windll.kernel32.SetThreadExecutionState(0x80000003); time.sleep(10**9)"
+                command = [sys.executable, "-c", code]
+            else:
+                raise RuntimeError("当前系统不支持 Orbit 防休眠")
+            self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif not enabled and self.process is not None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            self.process = None
 
 
 class OrbitHTTPServer(ThreadingHTTPServer):
@@ -39,6 +71,8 @@ class OrbitHTTPServer(ThreadingHTTPServer):
         self.verbose = False
         self._update_lock = threading.Lock()
         self._update_scheduled = False
+        self.sleep_inhibitor = SleepInhibitor()
+        self.sleep_inhibitor.set_enabled(bool(runtime.settings.get().get("prevent_sleep")))
         self._automatic_update_thread = threading.Thread(
             target=self._automatic_update_loop,
             name="orbit-auto-updater",
@@ -77,6 +111,10 @@ class OrbitHTTPServer(ThreadingHTTPServer):
         socketserver.TCPServer.server_bind(self)
         self.server_name = str(self.server_address[0])
         self.server_port = int(self.server_address[1])
+
+    def server_close(self) -> None:
+        self.sleep_inhibitor.set_enabled(False)
+        super().server_close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -310,7 +348,15 @@ class Handler(BaseHTTPRequestHandler):
                 queued = training_status in {"preparing", "generating", "waiting_memory", "needs_memory", "running", "stopping"}
                 self._json(202, {**updater.as_dict(info), "status": "queued_after_training" if queued else "installing"})
             elif path == "/api/settings":
-                self._json(200, self.server.runtime.settings.update(data))
+                previous = self.server.runtime.settings.get()
+                updated = self.server.runtime.settings.update(data)
+                if previous.get("prevent_sleep") != updated.get("prevent_sleep"):
+                    self.server.sleep_inhibitor.set_enabled(bool(updated.get("prevent_sleep")))
+                if previous.get("background_service") != updated.get("background_service"):
+                    service.set_autostart(bool(updated.get("background_service")))
+                if "computer_control" in data:
+                    self.server.runtime.code.set_computer_control(bool(updated.get("computer_control")))
+                self._json(200, updated)
             elif path == "/api/code/settings":
                 self._json(200, self.server.runtime.code.save_settings(data))
             elif path == "/api/code/settings/delete":

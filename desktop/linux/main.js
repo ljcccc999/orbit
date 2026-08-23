@@ -126,12 +126,16 @@ async function runOrbitQuietly(args) {
   try { await run(orbit, args); } catch (error) { console.error(error); }
 }
 
-async function quitOrbit() {
+function quitApp() {
   unregisterAutostart();
-  await runOrbitQuietly(["service", "uninstall"]);
   isQuitting = true;
   tray.destroy();
   app.quit();
+}
+
+async function stopAgent() {
+  await runOrbitQuietly(["service", "uninstall"]);
+  quitApp();
 }
 
 function createTray() {
@@ -144,7 +148,8 @@ function createTray() {
     { label: "Local API · 127.0.0.1:8765", enabled: false },
     { label: "Unload Model", click: () => runOrbitQuietly(["unload"]) },
     { type: "separator" },
-    { label: "Quit Orbit", click: quitOrbit },
+    { label: "Exit App (Agent Keeps Running)", click: quitApp },
+    { label: "Stop Background Agent", click: stopAgent },
   ]));
   tray.on("double-click", showOrbit);
 }

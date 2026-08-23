@@ -105,6 +105,9 @@ def test_orbit_code_ui_contains_queue_progress_review_and_compact_tools():
     assert "nav.insertBefore(plugins,models)" in PAGE
     assert "trainingResetFor='',modelNameConflict=false" in PAGE
     assert "}};['steps','batch','seq','accum'].forEach" in PAGE
+    assert 'id="preventSleep"' in PAGE
+    assert 'id="backgroundService"' in PAGE
+    assert 'id="computerControl"' in PAGE
 
 
 def test_long_term_memory_keeps_completed_task_summaries_not_file_bodies(tmp_path):
@@ -138,6 +141,7 @@ def test_intelligence_levels_scale_execution_and_token_budgets(tmp_path):
     assert instant["output_tokens"] < standard["output_tokens"] < maximum["output_tokens"]
     assert maximum["max_actions"] >= standard["max_actions"]
     assert "工作区" not in agent._system_prompt({"reasoning": "max"}, tmp_path)
+    assert "只有没有可靠命令行/API 路径" in agent._system_prompt({"reasoning": "max"}, tmp_path)
 
 
 def test_plugins_are_local_toggleable_and_injected_as_context(tmp_path):
@@ -187,6 +191,32 @@ def test_computer_tool_builds_argv_without_shell(monkeypatch, tmp_path):
     assert "已执行" in result
     assert captured["argv"][-3:] == ["kd:cmd,shift", "t:p", "ku:cmd,shift"]
     assert captured["kwargs"].get("shell") is None
+
+
+def test_computer_control_setting_blocks_and_logs_action(monkeypatch, tmp_path):
+    agent = _agent(tmp_path)
+    row = {"id": "d" * 24, "events": [], "updated_at": "", "pending_approval": None, "status": "running"}
+    agent._sessions[row["id"]] = row
+    result = agent._execute_with_policy(
+        row, {"tool": "computer", "action": "click", "x": 20, "y": 30, "summary": "点击确认按钮"},
+        {"permission": "full", "computer_control": False}, tmp_path, __import__("threading").Event(),
+    )
+    assert result["ok"] is False
+    assert "尚未允许" in result["error"]
+    assert row["events"][-1]["tool"] == "computer"
+    assert row["events"][-1]["status"] == "failed"
+
+
+def test_computer_control_sync_does_not_revalidate_incomplete_api_profile(tmp_path):
+    agent = _agent(tmp_path)
+    values = agent._defaults()
+    values.update(provider="api", model="", api_key="", computer_control=False)
+    agent.settings_path.write_text(json.dumps(values), encoding="utf-8")
+
+    result = agent.set_computer_control(True)
+
+    assert result["computer_control"] is True
+    assert result["provider"] == "api"
 
 
 def test_web_search_results_keep_keyword_content_and_real_destination():

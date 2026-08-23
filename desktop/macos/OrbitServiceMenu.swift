@@ -29,7 +29,7 @@ private final class OrbitServiceMenu: NSObject, NSApplicationDelegate {
         unload.target = self
         menu.addItem(unload)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit API", action: #selector(quitAPI), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Stop Background Agent", action: #selector(quitAPI), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
         statusItem.menu = menu

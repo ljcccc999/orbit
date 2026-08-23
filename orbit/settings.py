@@ -8,6 +8,13 @@ from typing import Any
 
 
 class OrbitSettings:
+    DEFAULTS = {
+        "auto_update": False,
+        "prevent_sleep": False,
+        "background_service": True,
+        "computer_control": False,
+    }
+
     def __init__(self, data_root: Path):
         self.path = data_root / "settings.json"
         self._lock = threading.RLock()
@@ -17,10 +24,10 @@ class OrbitSettings:
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(value, dict):
-                return {"auto_update": bool(value.get("auto_update", False))}
+                return {key: bool(value.get(key, default)) for key, default in self.DEFAULTS.items()}
         except (OSError, json.JSONDecodeError):
             pass
-        return {"auto_update": False}
+        return dict(self.DEFAULTS)
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -35,8 +42,8 @@ class OrbitSettings:
 
     def update(self, values: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            if "auto_update" in values:
-                self._values["auto_update"] = bool(values["auto_update"])
+            for key in self.DEFAULTS:
+                if key in values:
+                    self._values[key] = bool(values[key])
             self._save()
             return dict(self._values)
-
