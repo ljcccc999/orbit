@@ -272,6 +272,10 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert "正在调用':'调用了" in PAGE
     assert '#chat .chat-panel>.panel-head,#chat .inspector{display:none!important}' in PAGE
     assert '#chat .composer{position:absolute' in PAGE
+    assert "originalWorkspace=$('codeWorkspace')?.closest('.field')" in PAGE
+    assert "list.appendChild(originalWorkspace)" in PAGE
+    assert "--orbit-spring:cubic-bezier(.2,.82,.22,1)" in PAGE
+    assert ".product-menu:not([hidden]){animation:orbitGlassIn" in PAGE
     assert "title.textContent=currentLang==='zh'?'训练历史':'Training history'" in PAGE
     assert "title.textContent=currentLang==='zh'?'Code 对话历史':'Code conversations'" in PAGE
 

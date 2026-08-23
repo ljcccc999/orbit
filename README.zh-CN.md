@@ -105,7 +105,8 @@ Orbit 由三层组成：**架构层**（OCA 与 `orbit-hybrid-moe-v1`）、**训
 - 权限包括“请求批准”“替我批准·工作区”和“完全访问”。越界或危险操作仍经过本地权限流程。“允许操控鼠标和键盘”是默认关闭的独立开关：Agent 优先使用文件、API 和命令行，只有没有可靠程序化路径且确有必要时才操作界面；每次尝试都会显示在执行时间线中。
 - 关闭桌面窗口后，Agent 与本机 API 继续在后台运行；只有右上角状态菜单中的“退出 Orbit（停止 Agent 与 API）”才会结束后台 Agent 并释放本机 API 端口。设置中可选择工作时不让电脑休眠，以及是否登录时自动运行后台服务。
 - 每个任务都使用稳定的 Agent 系统提示词：明确 Orbit Code 是由 YUNSH 开发的 Orbit 产品，并规定规划、证据、安全、执行、验证和结果汇报方式。
-- API 页面支持本地 Orbit、OpenAI、Anthropic、Gemini、DeepSeek、xAI、Groq、Mistral、OpenRouter 和自定义 OpenAI 兼容接口，可保存多个配置且不显示完整 Key。若兼容接口拒绝可选 OpenAI 字段，会自动用基础字段重试一次。
+- API 页面支持本地 Orbit、OpenAI、Anthropic、Gemini、DeepSeek、xAI、Groq、Mistral、OpenRouter 和自定义 OpenAI 兼容接口。Orbit Code 会同时列出已验证的本机 checkpoint 与 API 配置，工作区路径保留在“高级”中；多个配置不显示完整 Key。若兼容接口拒绝可选 OpenAI 字段，会自动用基础字段重试一次。
+- 视觉统一使用 Apple 系统光学字体、分层半透明材质与可打断弹簧过渡，并明确支持“减少动态效果”和“降低透明度”。
 - 本地插件通过 `plugin.json` 导入并按设备启用，在新任务中加入插件说明；插件动作仍服从 Orbit Code 的同一套权限。
 
 ## 运行要求

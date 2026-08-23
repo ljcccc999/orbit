@@ -302,11 +302,12 @@ PAGE = PAGE.replace(
     r'''
 const codeAdvancedPanel=$('codeAdvancedPanel'),reasoningField=$('codeReasoning')?.closest('.field');
 if(codeAdvancedPanel){
-  const originalModel=$('codeModel')?.closest('.field'),originalSpeed=$('codeSpeed')?.closest('.field');
+  const originalModel=$('codeModel')?.closest('.field'),originalSpeed=$('codeSpeed')?.closest('.field'),originalWorkspace=$('codeWorkspace')?.closest('.field');
   codeAdvancedPanel.innerHTML='<div class="composer-reasoning" id="composerReasoning"></div><button class="composer-advanced-toggle" id="composerAdvancedToggle"><span>高级</span><span>›</span></button><div class="composer-settings-list" id="composerSettingsList" hidden></div>';
   const list=$('composerSettingsList');
   if(originalModel){originalModel.className='composer-setting';originalModel.querySelector('label').outerHTML='<span>模型</span>';list.appendChild(originalModel)}
   if(originalSpeed){originalSpeed.className='composer-setting';originalSpeed.querySelector('label').outerHTML='<span>速度</span>';list.appendChild(originalSpeed)}
+  if(originalWorkspace){originalWorkspace.className='composer-setting';originalWorkspace.querySelector('label').outerHTML='<span>工作区</span>';list.appendChild(originalWorkspace)}
   if(reasoningField)$('composerReasoning').appendChild(reasoningField);
   $('composerAdvancedToggle').onclick=event=>{event.stopPropagation();const hidden=list.hidden;list.hidden=!hidden;$('composerAdvancedToggle').lastElementChild.textContent=hidden?'⌄':'›'};
 }
@@ -320,6 +321,45 @@ const _orbitUserBubbleRenderEvent=renderCodeEvent;renderCodeEvent=function(event
 const _orbitConversationPageTitleRender=renderCodeSession;renderCodeSession=function(row){_orbitConversationPageTitleRender(row);$('pageTitle').textContent=row.title||'Orbit Code'};
 updateComposerModelLabel();
 ''' + "</script></body></html>",
+    1,
+)
+
+# Apple-style material and motion pass.  Motion remains interruptible and all
+# transforms are disabled under Reduce Motion; contrast and transparency
+# preferences retain their explicit fallbacks.
+PAGE = PAGE.replace(
+    "</style>",
+    r"""
+:root{--orbit-spring:cubic-bezier(.2,.82,.22,1);--orbit-glass-stroke:rgba(255,255,255,.86);--orbit-glass-shadow:0 18px 55px rgba(37,46,62,.10),inset 0 1px rgba(255,255,255,.92)}
+html{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","Segoe UI",sans-serif;font-optical-sizing:auto;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{background:radial-gradient(1000px 720px at 12% -16%,rgba(255,255,255,.96),transparent 62%),linear-gradient(135deg,#e9edf3 0%,#f6f7f9 48%,#e8edf4 100%)}
+.sidebar{background:linear-gradient(145deg,rgba(249,250,252,.63),rgba(228,233,241,.48));border-right-color:rgba(66,77,95,.08);box-shadow:inset -1px 0 rgba(255,255,255,.58);transition:transform .42s var(--orbit-spring),opacity .3s ease}
+.brand-switch,.sidebar>.nav button,.sidebar-history-list .run-item,.toolbar-nav button,.product-choice,.round-action,.send-or-guide,.code-elapsed,.code-stage>summary,.tool-run-row summary{transition:transform .36s var(--orbit-spring),background-color .24s ease,color .24s ease,box-shadow .28s ease,opacity .2s ease}
+.brand-switch{letter-spacing:-.025em}.brand-switch:hover,.sidebar>.nav button:hover,.sidebar-history-list .run-item:hover{transform:translateY(-1px)}
+.sidebar>.nav button:active,.sidebar-history-list .run-item:active,.product-choice:active{transform:scale(.975)}
+.sidebar>.nav button.active{background:linear-gradient(145deg,rgba(255,255,255,.78),rgba(244,247,251,.52));box-shadow:0 8px 24px rgba(43,53,72,.06),inset 0 1px rgba(255,255,255,.96)}
+.toolbar{border-bottom-color:rgba(68,79,96,.07);background:rgba(249,250,252,.54);backdrop-filter:blur(36px) saturate(180%)}
+.toolbar-title h1{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;font-weight:650;letter-spacing:-.02em}
+.toolbar-nav{position:relative;gap:4px;padding:4px;border:1px solid var(--orbit-glass-stroke);border-radius:15px;background:linear-gradient(145deg,rgba(255,255,255,.76),rgba(229,235,244,.44));backdrop-filter:blur(34px) saturate(200%);box-shadow:var(--orbit-glass-shadow)}
+.toolbar-nav:before{content:'';position:absolute;pointer-events:none;inset:1px;border-radius:13px;background:linear-gradient(125deg,rgba(255,255,255,.62),transparent 42%);opacity:.74}
+.toolbar-nav button{position:relative;z-index:1;width:34px;height:32px;border:1px solid rgba(255,255,255,.18);border-radius:10px;background:rgba(255,255,255,.08)}
+.toolbar-nav button+button{border-left-color:rgba(255,255,255,.18)}
+.toolbar-nav button:hover:not(:disabled){transform:translateY(-1px) scale(1.025);background:rgba(255,255,255,.72);box-shadow:0 7px 18px rgba(42,52,70,.09),inset 0 1px rgba(255,255,255,.95)}
+.toolbar-nav button:active:not(:disabled){transform:scale(.92)}
+.product-menu:not([hidden]){animation:orbitGlassIn .38s var(--orbit-spring)}
+.product-menu{border-color:var(--orbit-glass-stroke);background:linear-gradient(145deg,rgba(252,253,255,.88),rgba(232,237,245,.73));backdrop-filter:blur(42px) saturate(190%);box-shadow:0 28px 80px rgba(31,40,58,.18),inset 0 1px rgba(255,255,255,.98)}
+.product-choice:hover{transform:translateX(2px);background:rgba(255,255,255,.68)}
+.page.active{animation:orbitPageIn .42s var(--orbit-spring)}
+.liquid-pill,#chat .composer,#code .code-composer,.advanced-pop{border-color:var(--orbit-glass-stroke);background:linear-gradient(145deg,rgba(255,255,255,.80),rgba(235,239,246,.56));backdrop-filter:blur(38px) saturate(195%);box-shadow:var(--orbit-glass-shadow)}
+.round-action:hover{transform:translateY(-1px) scale(1.04);background:rgba(255,255,255,.74);box-shadow:0 8px 20px rgba(40,50,69,.09)}
+.send-or-guide:hover{transform:translateY(-1px) scale(1.035);box-shadow:0 10px 25px rgba(33,104,243,.25)}
+.code-stage[open]>.tool-run-group,.tool-run-row[open]>.tool-run-output{animation:orbitReveal .32s var(--orbit-spring)}
+@keyframes orbitGlassIn{from{opacity:0;transform:translateY(-7px) scale(.965)}to{opacity:1;transform:none}}
+@keyframes orbitPageIn{from{opacity:.15;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes orbitReveal{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.brand-switch,.sidebar>.nav button,.sidebar-history-list .run-item,.toolbar-nav button,.product-choice,.round-action,.send-or-guide,.code-elapsed,.code-stage>summary,.tool-run-row summary,.page.active,.product-menu:not([hidden]),.code-stage[open]>.tool-run-group,.tool-run-row[open]>.tool-run-output{animation:none!important;transition:none!important;transform:none!important}}
+@media(prefers-reduced-transparency:reduce){.sidebar,.toolbar,.toolbar-nav,.product-menu,.liquid-pill,#chat .composer,#code .code-composer,.advanced-pop{background:#f5f7fa;backdrop-filter:none}}
+""" + "</style>",
     1,
 )
 
