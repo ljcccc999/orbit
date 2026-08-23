@@ -17,7 +17,7 @@ from orbit.web_ui import PAGE
 
 
 def test_training_page_preserves_a_manually_entered_sample_count():
-    assert 'max="50000"' in PAGE
+    assert 'max="10000000"' in PAGE
     assert "manualSampleEdit=true" in PAGE
     assert "if(!manualSampleEdit)$('teacherExamples').value=r.recommended_examples" in PAGE
     assert "use_recommended_examples:!manualSampleEdit" in PAGE
@@ -38,12 +38,16 @@ def test_reset_form_balanced_recommendation_is_coupled_to_recommended_samples(tm
         "use_recommended_examples": True,
     })
     assert recommendation["optimization_goal"] == "balanced"
-    assert recommendation["recommended_examples"] == 2000
-    assert recommendation["config"]["steps"] == 26368
+    # The assistant field follows the Chinchilla-sized reference here; larger
+    # models may exceed the per-round safety cap and must use multiple rounds.
+    assert recommendation["recommended_examples"] == 888_889
+    assert recommendation["required_examples_for_reference"] == 888_889
+    assert recommendation["config"]["steps"] > 100_000
     estimate = recommendation["training_advice"]["dataset_estimate"]
     assert estimate["target_pretraining_tokens"] > 5_000_000_000
-    assert estimate["target_coverage_percent"] < 1
-    assert recommendation["training_advice"]["chat_ready_recipe"]["recommended_sft_samples"] == 100_000
+    assert 99.9 <= estimate["target_coverage_percent"] <= 100.1
+    assert recommendation["token_planning"]["tokens_per_parameter_reference"] == 20
+    assert recommendation["training_advice"]["chat_ready_recipe"]["curated_reference_samples"] == 1_000
 
     fast = runtime.training_recommendation({
         "preset": "300m",
@@ -63,8 +67,8 @@ def test_reset_form_balanced_recommendation_is_coupled_to_recommended_samples(tm
         "optimization_goal": "memory",
         "use_recommended_examples": True,
     })
-    assert fast["estimated_training_seconds"] < memory["estimated_training_seconds"]
-    assert fast["config"]["steps"] == 36915
+    assert fast["estimated_training_seconds"] <= recommendation["estimated_training_seconds"]
+    assert memory["config"]["seq_len"] <= recommendation["config"]["seq_len"]
     assert "applyOptimizationRecommendation" in PAGE
     assert "$('optimizationGoal')?.addEventListener('change',()=>{manualConfigEdit=false;scheduleRecommendation()})" in PAGE
 
@@ -456,6 +460,24 @@ def test_training_recommendation_exposes_goal_and_task_mix(tmp_path):
     assert policy["dialogue_ratio"] is None
     assert policy["name"] == "adaptive_quality_diverse_instruction_mix"
     assert "代码/SQL 生成" in policy["task_types"]
+
+
+def test_training_token_budget_scales_with_model_and_accepts_custom_planning_count(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    small = runtime.training_recommendation({"preset": "300m", "training_mode": "pretraining"})
+    large = runtime.training_recommendation({"preset": "38b", "training_mode": "pretraining"})
+    assert small["token_planning"]["recommended_tokens"] == 6_000_000_000
+    assert large["token_planning"]["recommended_tokens"] == 760_000_000_000
+    assert large["recommended_manual_tokens"] > small["recommended_manual_tokens"]
+
+    custom = runtime.training_recommendation({
+        "preset": "300m",
+        "training_mode": "pretraining",
+        "planning_parameter_count": "300,000,000,000,000",
+    })
+    assert custom["token_planning"]["is_calculator_only"] is True
+    assert custom["token_planning"]["target_tokens"] == 6_000_000_000_000_000
+    assert custom["token_planning"]["tokens_per_parameter"] == 20
 
 
 def test_teacher_api_settings_persist_locally(tmp_path):

@@ -36,6 +36,49 @@ from .training_config import TrainingConfig
 
 PRESETS = ("300m", "1b", "3b", "7b", "14b", "38b")
 MAX_MODEL_DOWNLOAD_BYTES = 64 * 1024 * 1024 * 1024
+# These are planning references, not quality guarantees.  Chinchilla reports
+# an approximately compute-optimal baseline of about 20 training tokens per
+# parameter; it does not prescribe a universal sample count or step count.
+CHINCHILLA_TOKENS_PER_PARAMETER = 20
+# Llama 3 reports 15T pretraining tokens for the 405B model.  This ratio is
+# exposed as a scale-specific comparison, never as a universal target.
+LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER = 15_000_000_000_000 / 405_000_000_000
+AI_SAMPLE_TOKEN_ESTIMATE = 6_750
+MAX_ASSISTED_SAMPLES = 10_000_000
+SFT_CURATED_REFERENCE_SAMPLES = 1_000
+NOMINAL_PARAMETERS = {
+    "300m": 300_000_000,
+    "1b": 1_000_000_000,
+    "3b": 3_000_000_000,
+    "7b": 7_000_000_000,
+    "14b": 14_000_000_000,
+    "38b": 38_000_000_000,
+}
+
+
+def _parse_human_count(value: Any, *, default: int = 0, maximum: int = 10**18) -> int:
+    """Parse a count pasted as ``300,000,000,000,000`` or ``300T``.
+
+    The web calculator accepts text so commas do not get rejected by a number
+    input.  Suffixes are decimal planning units, not binary memory units.
+    """
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return default
+    raw = str(value).strip().replace(",", "").replace("_", "").replace(" ", "")
+    if not raw:
+        return default
+    multiplier = 1
+    suffix = raw[-1:].upper()
+    if suffix in {"K", "M", "B", "T", "P"}:
+        multiplier = {"K": 10**3, "M": 10**6, "B": 10**9, "T": 10**12, "P": 10**15}[suffix]
+        raw = raw[:-1]
+    try:
+        parsed = int(float(raw) * multiplier)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(0, min(maximum, parsed))
 # Kept as a compatibility alias for existing metadata and integrations.
 ORBIT_IDENTITY = ORBIT_SYSTEM_PROMPT
 
@@ -409,7 +452,7 @@ class OrbitRuntime:
         device = str(payload.get("device", "auto")).lower()
         if device not in {"auto", "mps", "cuda", "cpu"}:
             raise ValueError("不支持的训练设备")
-        examples = max(1, min(50_000, int(payload.get("examples", 20))))
+        examples = max(1, min(MAX_ASSISTED_SAMPLES, int(payload.get("examples", 20))))
         text_chars = max(0, min(100_000_000, int(payload.get("text_chars", 0))))
         model = OrbitConfig.for_preset(preset)
         base = TrainingConfig.for_model(preset)
@@ -432,9 +475,36 @@ class OrbitRuntime:
         local_mps = device == "mps" or (device == "auto" and sys.platform == "darwin")
         if local_mps:
             seq_len = min(seq_len, 512)
-        scale_examples = {"300m": 2_000, "1b": 5_000, "3b": 10_000, "7b": 20_000, "14b": 30_000, "38b": 50_000}[preset]
         goal_chars = max(0, min(20_000, int(payload.get("goal_chars", 0))))
-        recommended_examples = min(50_000, scale_examples + min(10_000, goal_chars // 100))
+        base_model = str(payload.get("base_model", "")).strip()
+        requested_mode = str(payload.get("training_mode", "")).strip().lower()
+        if requested_mode not in {"pretraining", "fine_tuning"}:
+            requested_mode = "fine_tuning" if base_model else "pretraining"
+        base_source = str(payload.get("base_model_source", "local")).strip().lower() or "local"
+        nominal_parameters = NOMINAL_PARAMETERS[preset]
+        planning_parameters = _parse_human_count(
+            payload.get("planning_parameter_count"),
+            default=nominal_parameters,
+            maximum=10**18,
+        ) or nominal_parameters
+        reference_token_budget = planning_parameters * CHINCHILLA_TOKENS_PER_PARAMETER
+        requested_token_budget = _parse_human_count(
+            payload.get("target_training_tokens"),
+            default=0,
+            maximum=10**18,
+        )
+        target_pretraining_tokens = requested_token_budget or reference_token_budget
+        # For pretraining, the recommended AI sample count is derived from
+        # the token budget and the measured average sample length.  The
+        # per-round cap is an operational safety cap, not a claim that the
+        # cap is enough to pretrain every model size. Users can continue in
+        # multiple reviewed rounds.
+        required_samples_for_budget = math.ceil(target_pretraining_tokens / AI_SAMPLE_TOKEN_ESTIMATE)
+        recommended_examples = (
+            min(MAX_ASSISTED_SAMPLES, max(1, required_samples_for_budget))
+            if requested_mode == "pretraining"
+            else SFT_CURATED_REFERENCE_SAMPLES
+        )
         # A freshly reset form has not been edited by the user yet. In that
         # state the sample count and the advanced parameters must be one
         # coherent recommendation: do not calculate 100 steps from the
@@ -448,22 +518,20 @@ class OrbitRuntime:
             data_units = examples
         else:
             data_units = max(1, text_chars // max(256, seq_len))
-        steps = max(100, min(2000, data_units * (20 if bool(payload.get("assisted")) else 8)))
+        estimated_input_tokens = max(
+            int(payload.get("text_bytes", 0) or 0),
+            data_units * (AI_SAMPLE_TOKEN_ESTIMATE if bool(payload.get("assisted")) or use_recommended_examples else max(1, seq_len)),
+        )
+        steps = max(1, math.ceil(estimated_input_tokens / max(1, seq_len * max(1, base.batch_size) * max(1, base.grad_accum))))
         optimization_goal = str(payload.get("optimization_goal", "balanced")).strip().lower() or "balanced"
         if optimization_goal not in {"fast", "memory", "quality", "balanced"}:
             raise ValueError("训练优化目标必须是省时间、省内存、效果优先或平衡")
         if optimization_goal == "fast":
             seq_len = min(seq_len, 256)
-            steps = max(50, min(2000, round(steps * 0.4)))
-            recommended_examples = min(50_000, max(50, round(recommended_examples * 0.7)))
         elif optimization_goal == "memory":
             seq_len = min(seq_len, 256)
-            steps = max(50, min(2000, round(steps * 0.8)))
-            recommended_examples = min(50_000, max(50, round(recommended_examples * 0.8)))
         elif optimization_goal == "quality":
-            seq_len = max(seq_len, min(base.seq_len, 1024))
-            steps = max(100, min(2000, round(steps * 1.5)))
-            recommended_examples = min(50_000, max(recommended_examples, round(recommended_examples * 1.25)))
+            seq_len = max(seq_len, min(base.seq_len, 2048))
         if use_recommended_examples:
             data_units = recommended_examples
         warmup = max(10, min(200, steps // 10))
@@ -487,13 +555,17 @@ class OrbitRuntime:
         # assistance is measured in generated examples. Keep both linked to
         # the selected optimization target so the UI can recommend them
         # together. This is deliberately conservative for mixed-language text.
-        recommended_manual_chars = recommended_examples * 600
-        recommended_manual_words = max(1, round(recommended_manual_chars / 1.6))
-        base_model = str(payload.get("base_model", "")).strip()
-        requested_mode = str(payload.get("training_mode", "")).strip().lower()
-        base_source = str(payload.get("base_model_source", "local")).strip().lower() or "local"
-        if requested_mode not in {"pretraining", "fine_tuning"}:
-            requested_mode = "fine_tuning" if base_model else "pretraining"
+        # Manual pretraining material must scale with the token budget, not
+        # with the capped teacher-sample field.  Orbit's current tokenizer is
+        # byte-based, so this is an approximate UTF-8 byte/character budget;
+        # the UI also shows the exact token formula separately.
+        recommended_manual_tokens = (
+            target_pretraining_tokens
+            if requested_mode == "pretraining"
+            else SFT_CURATED_REFERENCE_SAMPLES * 512
+        )
+        recommended_manual_chars = recommended_manual_tokens
+        recommended_manual_words = max(1, round(recommended_manual_chars / 4))
         training_round = self._training_round(payload, base_model or None)
         parent_preset = None
         if requested_mode == "fine_tuning" and base_model:
@@ -504,10 +576,10 @@ class OrbitRuntime:
         # from-scratch pretraining schedule.
         if requested_mode == "fine_tuning":
             if use_recommended_examples:
-                recommended_examples = {
-                    "fast": 50_000, "memory": 50_000,
-                    "balanced": 50_000, "quality": 50_000,
-                }[optimization_goal]
+                # LIMA is a useful evidence point for curated SFT (1,000
+                # examples), but it is not a universal law.  The user can
+                # raise this after the validation set shows missing coverage.
+                recommended_examples = SFT_CURATED_REFERENCE_SAMPLES
                 data_units = recommended_examples
             # Chat SFT is measured by packed token coverage and dataset passes,
             # not by an arbitrary fixed 600-step ceiling.  A pretrained 300M
@@ -516,7 +588,10 @@ class OrbitRuntime:
                 int(payload.get("text_bytes", 0) or 0),
                 data_units * 512,
             )
-            sft_passes = 1 if optimization_goal == "fast" else 3 if optimization_goal == "quality" else 2
+            # One pass is the conservative starting point.  Quality mode
+            # allows a second pass only as an explicit validation-driven
+            # trade-off; no paper supports a universal fixed epoch count.
+            sft_passes = 2 if optimization_goal == "quality" else 1
             sft_accum = 8 if preset == "300m" else max(8, config.grad_accum)
             sft_steps = max(1, math.ceil(estimated_sft_tokens * sft_passes / max(1, config.seq_len * config.batch_size * sft_accum)))
             config = config.with_overrides(
@@ -533,7 +608,7 @@ class OrbitRuntime:
             # one generated document equals one optimizer update.
             estimated_pretrain_tokens = max(
                 int(payload.get("text_bytes", 0) or 0),
-                data_units * 6_750 if bool(payload.get("assisted")) or use_recommended_examples else 0,
+                data_units * AI_SAMPLE_TOKEN_ESTIMATE if bool(payload.get("assisted")) or use_recommended_examples else 0,
             )
             passes = 1 if optimization_goal in {"fast", "balanced", "memory"} else 2
             coverage_steps = max(1, math.ceil(estimated_pretrain_tokens * passes / max(1, config.seq_len * config.batch_size * config.grad_accum)))
@@ -542,8 +617,13 @@ class OrbitRuntime:
                 warmup_steps=max(10, round(coverage_steps * 0.03)),
                 checkpoint_every=max(100, min(2000, coverage_steps // 10)),
             )
-        recommended_manual_chars = recommended_examples * (600 if requested_mode == "pretraining" else 350)
-        recommended_manual_words = max(1, round(recommended_manual_chars / 1.6))
+        recommended_manual_tokens = (
+            target_pretraining_tokens
+            if requested_mode == "pretraining"
+            else SFT_CURATED_REFERENCE_SAMPLES * 512
+        )
+        recommended_manual_chars = recommended_manual_tokens
+        recommended_manual_words = max(1, round(recommended_manual_chars / 4))
         mode_valid = (
             bool(base_model)
             if requested_mode == "fine_tuning" or training_round > 1
@@ -556,16 +636,14 @@ class OrbitRuntime:
         requested_batch = max(1, int(payload.get("batch_size", 0) or config.batch_size))
         requested_accum = max(1, int(payload.get("grad_accum", 0) or config.grad_accum))
         requested_seq = max(8, int(payload.get("seq_len", 0) or config.seq_len))
-        requested_examples = max(1, min(50_000, int(payload.get("examples", 20))))
+        requested_examples = max(1, min(MAX_ASSISTED_SAMPLES, int(payload.get("examples", 20))))
         text_bytes = max(0, min(500_000_000, int(payload.get("text_bytes", 0) or 0)))
         estimated_sequences = text_bytes // max(1, requested_seq + 1) if text_bytes else 0
         effective_batch = requested_batch * requested_accum
         estimated_updates_per_corpus = max(1, (estimated_sequences + effective_batch - 1) // effective_batch) if estimated_sequences else 0
         parameter_count = model.estimate_parameters()
-        nominal_parameters = {"300m": 300_000_000, "1b": 1_000_000_000, "3b": 3_000_000_000, "7b": 7_000_000_000, "14b": 14_000_000_000, "38b": 38_000_000_000}[preset]
-        target_pretraining_tokens = max(parameter_count, nominal_parameters) * 20
-        estimated_generated_tokens = text_bytes + (data_units * (6_750 if requested_mode == "pretraining" else 512) if bool(payload.get("assisted")) or use_recommended_examples else 0)
-        from_scratch_required_samples = math.ceil(target_pretraining_tokens / 6_750)
+        estimated_generated_tokens = text_bytes + (data_units * (AI_SAMPLE_TOKEN_ESTIMATE if requested_mode == "pretraining" else 512) if bool(payload.get("assisted")) or use_recommended_examples else 0)
+        from_scratch_required_samples = math.ceil(target_pretraining_tokens / AI_SAMPLE_TOKEN_ESTIMATE)
         from_scratch_required_steps = math.ceil(target_pretraining_tokens / max(1, requested_seq * requested_batch * requested_accum))
         canonical_from_scratch_steps = math.ceil(target_pretraining_tokens / (1024 * 1 * 8))
         advice: list[dict[str, str]] = []
@@ -581,11 +659,35 @@ class OrbitRuntime:
             "quality": {"zh": "效果优先（不计时间）", "en": "Quality first (time is not a constraint)"},
             "balanced": {"zh": "平衡", "en": "Balanced"},
         }
+        goal_basis = {
+            "balanced": {
+                "zh": "研究基线：Chinchilla 约 20 token/参数；步数由实际语料 token、序列长度、batch 和梯度累计计算，不写死步数。",
+                "en": "Research baseline: Chinchilla uses about 20 tokens/parameter; steps are calculated from actual corpus tokens, sequence length, batch and accumulation rather than hard-coded.",
+            },
+            "fast": {
+                "zh": "论文没有规定“省时间”配置；这里仅降低本轮序列长度/执行成本，明确标为流程实验，不能当成完整预训练建议。",
+                "en": "Papers do not prescribe a universal time-saving profile; this only lowers per-run sequence/cost and is explicitly a pipeline experiment, not a full-pretraining recommendation.",
+            },
+            "memory": {
+                "zh": "研究依据：LoRA/QLoRA 通过冻结基础模型和参数高效训练降低微调内存；对从零预训练只能降低序列/批次，不能减少所需 token。",
+                "en": "Research basis: LoRA/QLoRA reduce fine-tuning memory by freezing the base model and training fewer parameters; for from-scratch pretraining, lower sequence/batch saves memory but does not reduce the token requirement.",
+            },
+            "quality": {
+                "zh": "数据量参考：Llama 3 报告公开了约 15T token/405B 参数的规模实例；这不是所有模型的固定比例，必须结合去重、质量和验证集。",
+                "en": "Data reference: the Llama 3 report publishes one scale example of about 15T tokens for 405B parameters; it is not a universal ratio and must be combined with deduplication, quality and validation.",
+            },
+        }
         advice.append({
             "severity": "info", "code": "optimization_goal",
-            "zh": f"当前参数目标：{goal_titles[optimization_goal]['zh']}。样本数、步数、序列长度、梯度累计和 checkpoint 频率都会随目标调整；仍可在高级参数中手动修改。",
-            "en": f"Optimization target: {goal_titles[optimization_goal]['en']}. Sample count, steps, sequence length, accumulation and checkpoint frequency are adjusted together; you can still edit advanced values manually.",
+            "zh": f"当前参数目标：{goal_titles[optimization_goal]['zh']}。{goal_basis[optimization_goal]['zh']} 高级参数仍可手动修改，但修改后页面会重新计算 token 覆盖、有效 batch 和 optimizer steps。",
+            "en": f"Optimization target: {goal_titles[optimization_goal]['en']}. {goal_basis[optimization_goal]['en']} Advanced values remain editable, but changing them recalculates token coverage, effective batch and optimizer steps.",
         })
+        if requested_mode == "pretraining" and required_samples_for_budget > MAX_ASSISTED_SAMPLES:
+            advice.append({
+                "severity": "warning", "code": "assisted_round_cap",
+                "zh": f"完整参考预算按当前平均每条约 {AI_SAMPLE_TOKEN_ESTIMATE:,} token 需要约 {required_samples_for_budget:,} 条独立样本；教师 AI 每轮最多 {MAX_ASSISTED_SAMPLES:,} 条。请分多轮生成、查看和去重，不要一次性盲目消耗 API 额度或磁盘空间。",
+                "en": f"The full reference budget needs about {required_samples_for_budget:,} independent samples at the current average of {AI_SAMPLE_TOKEN_ESTIMATE:,} tokens each; the teacher is capped at {MAX_ASSISTED_SAMPLES:,} per round. Generate, inspect and deduplicate across rounds instead of blindly consuming API quota or disk space.",
+            })
         policy = self._corpus_policy(requested_mode)
         advice.append({
             "severity": "info", "code": "corpus_policy",
@@ -623,8 +725,8 @@ class OrbitRuntime:
             })
             advice.append({
                 "severity": "info", "code": "chat_sft_recipe",
-                "zh": "约 300M 已预训练基础模型要获得基础聊天能力：最低约 5 万条、推荐 10 万条高质量指令/对话样本；序列 1024、Batch 1、梯度累计 8、学习率 1e-5～2e-5、训练 2 轮。10 万条、平均 512 token 时约 12,500 次优化器更新。",
-                "en": "For basic chat ability on an approximately 300M pretrained base: use at least 50k and preferably 100k high-quality instruction/dialogue samples; sequence 1,024, batch 1, accumulation 8, learning rate 1e-5–2e-5, for two passes. At 512 tokens per sample, 100k samples require about 12,500 optimizer updates.",
+                "zh": f"当前 {preset.upper()} 微调建议先从约 {SFT_CURATED_REFERENCE_SAMPLES:,} 条高质量、去重后的样本开始；LIMA 证明 1,000 条精心筛选样本可以作为研究基线，但不是所有任务的保证。序列 1024、Batch 1、梯度累计 8、较低学习率，先跑 1 轮并看验证集；只有验证集继续改善才增加到第 2 轮。样本数由任务覆盖决定，不按 M/B 机械放大。",
+                "en": f"For the current {preset.upper()} fine-tuning scale, start around {SFT_CURATED_REFERENCE_SAMPLES:,} high-quality, deduplicated examples. LIMA makes 1,000 curated examples a useful research baseline, not a guarantee for every task. Use sequence 1,024, batch 1, accumulation 8 and a low learning rate; start with one pass and inspect held-out validation before adding a second. Dataset coverage, not M/B size alone, determines the final sample count.",
             })
         else:
             mode_title = (
@@ -660,8 +762,8 @@ class OrbitRuntime:
                 ratio = estimated_generated_tokens / max(1, target_pretraining_tokens) * 100
                 advice.append({
                     "severity": "error", "code": "pretrain_token_shortfall",
-                    "zh": f"按当前输入估算约 {estimated_generated_tokens:,} 个字节 token，只达到约 300M 从零预训练参考目标 {target_pretraining_tokens:,} token 的 {ratio:.4f}%。这可以验证流程，但不能据此承诺正常聊天。按当前每条约 6,750 token，需要约 {from_scratch_required_samples:,} 条独立样本。",
-                    "en": f"The current input is estimated at {estimated_generated_tokens:,} byte tokens, only {ratio:.4f}% of the {target_pretraining_tokens:,}-token reference target for from-scratch pretraining at this scale. This can validate the pipeline, but cannot promise normal chat. At about 6,750 tokens per document, roughly {from_scratch_required_samples:,} independent samples are required.",
+                    "zh": f"按当前输入估算约 {estimated_generated_tokens:,} 个字节 token，只达到约 {preset.upper()} 从零预训练参考目标 {target_pretraining_tokens:,} token 的 {ratio:.4f}%。这可以验证流程，但不能据此承诺正常聊天。按当前每条约 {AI_SAMPLE_TOKEN_ESTIMATE:,} token，需要约 {from_scratch_required_samples:,} 条真正独立的样本。",
+                    "en": f"The current input is estimated at {estimated_generated_tokens:,} byte tokens, only {ratio:.4f}% of the {preset.upper()} from-scratch reference target of {target_pretraining_tokens:,} tokens. This can validate the pipeline, but cannot promise normal chat. At about {AI_SAMPLE_TOKEN_ESTIMATE:,} tokens per document, roughly {from_scratch_required_samples:,} genuinely independent samples are required.",
                 })
             advice.append({
                 "severity": "info", "code": "pretrain_units",
@@ -680,6 +782,24 @@ class OrbitRuntime:
                 "zh": f"有效批次约为 {requested_batch * requested_accum}；它主要提高梯度稳定性，但会延长每次参数更新所需时间。",
                 "en": f"The effective batch is about {requested_batch * requested_accum}; it mainly stabilizes gradients but lengthens each optimizer update.",
             })
+        token_planning = {
+            "parameter_count": planning_parameters,
+            "parameter_count_is_custom": planning_parameters != nominal_parameters,
+            "architecture_parameter_count": parameter_count,
+            "nominal_parameter_count": nominal_parameters,
+            "reference_rule": "Chinchilla ≈ 20 training tokens per parameter",
+            "tokens_per_parameter_reference": CHINCHILLA_TOKENS_PER_PARAMETER,
+            "recommended_tokens": reference_token_budget,
+            "data_rich_reference_tokens": round(planning_parameters * LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER),
+            "data_rich_reference_tokens_per_parameter": round(LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER, 6),
+            "requested_tokens": requested_token_budget or None,
+            "target_tokens": target_pretraining_tokens,
+            "tokens_per_parameter": round(target_pretraining_tokens / max(1, planning_parameters), 6),
+            "formula": f"{planning_parameters:,} × {CHINCHILLA_TOKENS_PER_PARAMETER} = {reference_token_budget:,}",
+            "data_rich_formula": f"{planning_parameters:,} × {LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER:.2f} ≈ {round(planning_parameters * LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER):,}",
+            "is_calculator_only": planning_parameters != nominal_parameters,
+            "note": "This is a pretraining planning reference. It does not change the selected Orbit architecture or make a small corpus sufficient.",
+        }
         training_advice = {
             "mode": requested_mode,
             "mode_title": mode_title,
@@ -691,6 +811,8 @@ class OrbitRuntime:
             "corpus_policy": self._corpus_policy(requested_mode),
             "optimization_goal": optimization_goal,
             "optimization_goal_title": goal_titles[optimization_goal],
+            "optimization_basis": goal_basis[optimization_goal],
+            "token_planning": token_planning,
             "mode_valid": mode_valid,
             "items": advice,
             "requested": {
@@ -701,6 +823,9 @@ class OrbitRuntime:
                 "text_bytes": text_bytes,
                 "estimated_tokens": estimated_generated_tokens,
                 "target_pretraining_tokens": target_pretraining_tokens if requested_mode == "pretraining" else None,
+                "reference_tokens_per_parameter": CHINCHILLA_TOKENS_PER_PARAMETER,
+                "tokens_per_parameter": round(target_pretraining_tokens / max(1, planning_parameters), 6),
+                "optimizer_updates": config.steps,
                 "target_coverage_percent": round(estimated_generated_tokens / max(1, target_pretraining_tokens) * 100, 6) if requested_mode == "pretraining" else None,
                 "from_scratch_required_samples": from_scratch_required_samples if requested_mode == "pretraining" else None,
                 "from_scratch_required_steps": from_scratch_required_steps if requested_mode == "pretraining" else None,
@@ -711,16 +836,16 @@ class OrbitRuntime:
             },
             "chat_ready_recipe": {
                 "recommended_path": "pretrained_base_then_sft",
-                "minimum_sft_samples": 50_000,
-                "recommended_sft_samples": 100_000,
-                "quality_sft_samples": 200_000,
+                "curated_reference_samples": SFT_CURATED_REFERENCE_SAMPLES,
+                "recommended_start_samples": SFT_CURATED_REFERENCE_SAMPLES,
+                "larger_coverage_samples": 10_000,
                 "sequence_length": 1024,
                 "batch_size": 1,
                 "gradient_accumulation": 8,
                 "learning_rate_min": 1e-5,
                 "learning_rate_max": 2e-5,
                 "passes": 2,
-                "recommended_optimizer_steps": 12_500,
+                "recommended_optimizer_steps": math.ceil(SFT_CURATED_REFERENCE_SAMPLES * 512 / (1024 * 1 * 8)),
                 "from_scratch_target_tokens": target_pretraining_tokens,
                 "from_scratch_current_length_samples": from_scratch_required_samples,
                 "from_scratch_optimizer_steps": canonical_from_scratch_steps,
@@ -749,6 +874,9 @@ class OrbitRuntime:
             "required_memory_gb": round(required, 1),
             "available_memory_gb": round(available, 1),
             "recommended_examples": recommended_examples,
+            "required_examples_for_reference": required_samples_for_budget if requested_mode == "pretraining" else SFT_CURATED_REFERENCE_SAMPLES,
+            "assisted_sample_cap": MAX_ASSISTED_SAMPLES,
+            "recommended_manual_tokens": recommended_manual_tokens,
             "recommended_manual_chars": recommended_manual_chars,
             "recommended_manual_words": recommended_manual_words,
             "recommended_manual_text": f"约 {recommended_manual_chars:,} 个字符（约 {recommended_manual_words:,} 个词；中文可按字符数准备）",
@@ -766,7 +894,9 @@ class OrbitRuntime:
             "training_round": training_round,
             "base_model_source": base_source,
             "optimization_goal": optimization_goal,
+            "optimization_basis": goal_basis[optimization_goal],
             "mode_valid": mode_valid,
+            "token_planning": token_planning,
         }
 
     def system_state(self) -> dict[str, Any]:

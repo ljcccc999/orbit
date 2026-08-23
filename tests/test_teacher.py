@@ -54,6 +54,16 @@ def test_teacher_rejects_insecure_remote_http():
         raise AssertionError("remote HTTP should be rejected")
 
 
+def test_teacher_allows_large_but_bounded_per_round_sample_count():
+    teacher.TeacherConfig(instruction="x", examples=10_000_000).validate()
+    try:
+        teacher.TeacherConfig(instruction="x", examples=10_000_001).validate()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("per-round sample safety cap should be enforced")
+
+
 def test_teacher_retries_empty_content(monkeypatch):
     calls = []
 
