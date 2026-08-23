@@ -222,6 +222,8 @@ Open **Settings** and enable **Automatically update Orbit**. Orbit checks the of
 
 The original 0.5.0 runtime predates the updater. It needs one manual installation of a newer Orbit version before in-app updates can take over.
 
+After replacing the runtime and desktop bundle, the updater forces one final background-service reload and waits for the new service to become healthy. This prevents an older KeepAlive process from serving stale in-memory UI code under the new version number.
+
 ## Private development workspace
 
 Invited developers participate only through the private Orbit project workspace for implementation, review, and testing. The workspace address and access are provided separately by the project owner.

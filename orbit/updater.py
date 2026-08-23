@@ -176,6 +176,22 @@ def _install_macos_app(info: UpdateInfo) -> bool:
         shutil.rmtree(temp_root, ignore_errors=True)
 
 
+def _reload_background_service() -> None:
+    """Force the service to import the runtime that was just installed.
+
+    The installer normally starts Orbit, but an old KeepAlive process can win
+    a short race and make the health check succeed before the replacement
+    package is imported.  A final stop/start boundary prevents the visible
+    version and the in-memory web UI from disagreeing.
+    """
+    from orbit import service
+
+    service.stop()
+    time.sleep(0.5)
+    service.start()
+    service.ensure_running(timeout=30)
+
+
 def install_latest(info: UpdateInfo) -> int:
     if not info.available or not info.tag:
         return 0
@@ -190,6 +206,10 @@ def install_latest(info: UpdateInfo) -> int:
     if code != 0:
         return code
     if platform.system() == "Darwin" and not _install_macos_app(info):
+        return 1
+    try:
+        _reload_background_service()
+    except Exception:
         return 1
     return 0
 
