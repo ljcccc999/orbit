@@ -408,6 +408,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.unload_model())
             elif path == "/api/models/delete":
                 self._json(200, self.server.runtime.delete_model(str(data.get("model", "")), str(data.get("confirmation", ""))))
+            elif path == "/api/models/rename":
+                self._json(200, self.server.runtime.rename_model(str(data.get("model", "")), str(data.get("name", ""))))
             elif path == "/api/models/export":
                 result = self.server.runtime.export_model(str(data.get("model", "")), str(data.get("target", "server")))
                 result["download"] = f"/api/exports/{result['filename']}"

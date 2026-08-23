@@ -84,6 +84,8 @@ class OrbitCodeAgent:
             "capability": "3",
             "active_profile_id": "",
             "profiles": [],
+            "local_model_order": [],
+            "model_order": [],
             "local_context": True,
             "long_term_memory": True,
             "computer_control": False,
@@ -98,6 +100,10 @@ class OrbitCodeAgent:
                 values.update({key: loaded[key] for key in values if key in loaded})
         except (OSError, json.JSONDecodeError):
             pass
+        if values.get("provider") == "local" and not str(values.get("model", "")).strip():
+            local_models = self._list_local_models()
+            if local_models:
+                values["model"] = str(local_models[0].get("id", ""))
         return values
 
     def public_settings(self) -> dict[str, Any]:
@@ -118,10 +124,14 @@ class OrbitCodeAgent:
                 "key_hint": ("••••" + secret[-4:]) if secret else "",
             })
         values["profiles"] = profiles
+        local_models = self._list_local_models()
+        local_order = [str(item) for item in values.get("local_model_order", [])]
+        local_rank = {model_id: index for index, model_id in enumerate(local_order)}
+        local_models.sort(key=lambda row: (local_rank.get(str(row.get("id", "")), len(local_rank)), str(row.get("name") or row.get("id") or "").lower()))
         values.update({
             "has_api_key": bool(key),
             "key_hint": ("••••" + key[-4:]) if key else "",
-            "local_models": self._list_local_models(),
+            "local_models": local_models,
         })
         return values
 
@@ -133,6 +143,20 @@ class OrbitCodeAgent:
         for key in ("local_context", "long_term_memory", "computer_control"):
             if key in payload:
                 values[key] = bool(payload[key])
+        if isinstance(payload.get("profile_order"), list):
+            requested = [str(item) for item in payload["profile_order"]]
+            rows = values.get("profiles", [])
+            by_id = {str(row.get("id", "")): row for row in rows}
+            values["profiles"] = [by_id[item] for item in requested if item in by_id] + [row for row in rows if str(row.get("id", "")) not in requested]
+        if isinstance(payload.get("local_model_order"), list):
+            known = {str(row.get("id", "")) for row in self._list_local_models()}
+            values["local_model_order"] = [str(item) for item in payload["local_model_order"] if str(item) in known]
+        if isinstance(payload.get("model_order"), list):
+            api_ids = {"api:" + str(row.get("id", "")) for row in values.get("profiles", [])}
+            local_ids = {"local:" + str(row.get("id", "")) for row in self._list_local_models()}
+            known = api_ids | local_ids
+            requested = [str(item) for item in payload["model_order"] if str(item) in known]
+            values["model_order"] = requested + [item for item in values.get("model_order", []) if item in known and item not in requested]
         if str(payload.get("api_key", "")).strip():
             values["api_key"] = str(payload["api_key"]).strip()
         if values["provider"] not in {"local", "api"}:

@@ -287,12 +287,26 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert "['claude-sonnet-5','Claude Sonnet 5 · 速度与能力']" in PAGE
     assert "['deepseek-v4-flash','DeepSeek V4 Flash · 快速']" in PAGE
     assert "function selectedCodeApiModel()" in PAGE
-    assert 'id="showLocalConfig"' in PAGE
-    assert 'id="showApiConfig"' in PAGE
-    assert "function showCodeConfigPane(name)" in PAGE
+    assert 'id="codeModelLibrary"' in PAGE
+    assert 'id="openApiEditor"' in PAGE
+    assert "function wireCodeModelSorting()" in PAGE
+    assert "function setCodeDefaultModel(key)" in PAGE
+    assert "编辑本地模型" in PAGE
+    assert "model-row-menu" in PAGE
     assert 'font-family:"PingFang SC"' in PAGE
     assert '.product-letter{display:block' in PAGE
     assert '#codeApi.page.active{height:100%;min-height:0;overflow:hidden' in PAGE
+
+
+def test_local_model_display_name_can_be_edited_without_renaming_checkpoint(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    checkpoint = runtime.models_root / "stable-id.pt"
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint.write_bytes(b"checkpoint")
+    result = runtime.rename_model("stable-id", "我的本地模型")
+    assert result["name"] == "我的本地模型"
+    assert checkpoint.exists()
+    assert runtime.list_models()[0]["name"] == "我的本地模型"
 
 
 def test_external_base_models_are_not_allowed_for_from_scratch_training(tmp_path):

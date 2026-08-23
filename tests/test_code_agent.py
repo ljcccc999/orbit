@@ -39,6 +39,25 @@ def test_code_api_profiles_are_multiple_and_keys_stay_private(tmp_path):
     assert len(agent.public_settings()["profiles"]) == 1
 
 
+def test_code_model_order_is_persisted_for_api_and_local_models(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    agent = _agent(tmp_path)
+    saved = agent.save_settings({
+        "workspace": str(workspace), "provider": "api", "save_profile": True,
+        "profile_name": "Cloud", "base_url": "https://api.example.com/v1",
+        "model": "cloud-model", "api_key": "secret",
+    })
+    api_key = "api:" + saved["profiles"][0]["id"]
+    updated = agent.save_settings({
+        "workspace": str(workspace), "provider": "local", "model": "orbit-local",
+        "model_order": ["local:orbit-local", api_key],
+    })
+    assert updated["model_order"] == ["local:orbit-local", api_key]
+    assert updated["provider"] == "local"
+    assert updated["model"] == "orbit-local"
+
+
 def test_promoted_guidance_cannot_be_cancelled(tmp_path):
     agent = _agent(tmp_path)
     session_id = "a" * 24

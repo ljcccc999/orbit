@@ -2107,6 +2107,19 @@ class OrbitRuntime:
             raise FileNotFoundError(f"找不到可删除的本地模型：{model_id}")
         return {"status": "deleted", "model": model_id, "removed": removed, "training_history_preserved": True}
 
+    def rename_model(self, model_id: str, display_name: str) -> dict[str, Any]:
+        """Rename only the user-facing label; keep checkpoint identity and lineage stable."""
+        self._checkpoint_for(model_id)
+        display_name = str(display_name or "").strip()
+        if not display_name or len(display_name) > 80:
+            raise ValueError("模型显示名称需要是 1–80 个字符")
+        metadata = self._model_metadata(model_id)
+        metadata["name"] = display_name
+        metadata["display_name"] = display_name
+        metadata["model_id"] = model_id
+        self._write_model_metadata(model_id, metadata)
+        return {"status": "renamed", "model": model_id, "name": display_name}
+
     def _delete_stopped_training_model(self) -> dict[str, Any]:
         """Delete the checkpoint belonging to a training job that already stopped.
 
