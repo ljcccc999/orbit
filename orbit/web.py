@@ -202,6 +202,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, updater.as_dict(updater.check()))
             elif path == "/api/settings":
                 self._json(200, self.server.runtime.settings.get())
+            elif path == "/api/code/settings":
+                self._json(200, self.server.runtime.code.public_settings())
+            elif path == "/api/code/sessions":
+                self._json(200, self.server.runtime.code.list_sessions())
+            elif path.startswith("/api/code/sessions/"):
+                self._json(200, self.server.runtime.code.get(path.split("/")[4]))
             elif path.startswith("/api/community/export/"):
                 self._download_community(path.split("/")[4])
             elif path.startswith("/api/community/"):
@@ -300,6 +306,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(202, {**updater.as_dict(info), "status": "queued_after_training" if queued else "installing"})
             elif path == "/api/settings":
                 self._json(200, self.server.runtime.settings.update(data))
+            elif path == "/api/code/settings":
+                self._json(200, self.server.runtime.code.save_settings(data))
+            elif path == "/api/code/settings/delete":
+                self._json(200, self.server.runtime.code.delete_profile(str(data.get("profile_id", ""))))
+            elif path == "/api/code/sessions":
+                self._json(202, self.server.runtime.code.start(data))
+            elif path.startswith("/api/code/sessions/") and path.endswith("/approval"):
+                self._json(200, self.server.runtime.code.approve(path.split("/")[4], data.get("approved") is True))
+            elif path.startswith("/api/code/sessions/") and path.endswith("/stop"):
+                self._json(202, self.server.runtime.code.stop(path.split("/")[4]))
+            elif path.startswith("/api/code/sessions/") and path.endswith("/guide"):
+                self._json(202, self.server.runtime.code.guide(
+                    path.split("/")[4], str(data.get("prompt", "")), str(data.get("mode", "queue")),
+                ))
+            elif path.startswith("/api/code/sessions/") and path.endswith("/guide-update"):
+                self._json(200, self.server.runtime.code.update_guidance(
+                    path.split("/")[4], str(data.get("directive_id", "")),
+                    str(data.get("action", "")), str(data.get("prompt", "")),
+                ))
             elif path == "/api/conversations":
                 self._json(201, self.server.runtime.conversations.create())
             elif path == "/api/conversations/delete":

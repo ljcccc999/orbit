@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from .config import OrbitConfig
 from .community import CommunityStore
+from .code_agent import OrbitCodeAgent
 from .conversations import ConversationStore
 from .hub import OrbitHubClient
 from .jobs import create_job_bundle
@@ -105,6 +106,7 @@ class OrbitRuntime:
         self.memory = LongTermMemory(self.data_root)
         self.hub = OrbitHubClient(self.data_root)
         self.settings = OrbitSettings(self.data_root)
+        self.code = OrbitCodeAgent(self.data_root, self.chat, self.list_models)
         self._hub_upload: dict[str, Any] = {"status": "idle", "progress": 0, "message": "尚未上传", "model": None}
         self._model_download: dict[str, Any] = {"status": "idle", "progress": 0, "message": "没有正在下载模型", "model": None}
         self._pending_training: tuple[dict[str, Any], str, dict[str, Any], str] | None = None

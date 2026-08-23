@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
@@ -50,10 +52,25 @@ def _urlopen(request: urllib.request.Request, timeout: float):
 
 
 def current_version() -> str:
+    # When the service is running from a source checkout, an older installed
+    # dist-info entry can otherwise win and make the UI report a stale version.
+    # The checkout's declared version is authoritative in that case; bundled
+    # installs do not contain this project manifest and use package metadata.
+    for candidate in (Path(__file__).resolve().parents[1] / "pyproject.toml", Path.cwd() / "pyproject.toml"):
+        try:
+            import tomllib
+            with candidate.open("rb") as handle:
+                value = str(tomllib.load(handle).get("project", {}).get("version", "")).strip()
+            if value:
+                return value
+        except (OSError, KeyError, TypeError, ValueError):
+            continue
     try:
         return metadata.version("orbit-ai")
     except metadata.PackageNotFoundError:
-        return "0.6.13"
+        # Never report an unrelated historical version and make the UI claim
+        # that a new app was installed.
+        return "0.0.0"
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -110,6 +127,55 @@ def _download_script(name: str, tag: str) -> Path:
     return path
 
 
+def _install_macos_app(info: UpdateInfo) -> bool:
+    """Replace the desktop bundle after the runtime update succeeds.
+
+    The old updater only refreshed ``~/.orbit/runtime``.  That left the
+    browser API on a newer codebase while the visible macOS app remained old.
+    This runs in the detached updater process, after the service has stopped,
+    so the app can be swapped and reopened without interrupting training.
+    """
+    app_path = Path(os.environ.get("ORBIT_APP_PATH", "/Applications/Orbit.app"))
+    if not app_path.exists() or not info.tag:
+        return True
+    temp_root = Path(tempfile.mkdtemp(prefix="orbit-app-update-"))
+    try:
+        archive = temp_root / "Orbit-macOS-universal.zip"
+        url = f"https://github.com/{REPOSITORY}/releases/download/{info.tag}/Orbit-macOS-universal.zip"
+        request = urllib.request.Request(url, headers={"User-Agent": "Orbit-Updater"})
+        with _urlopen(request, timeout=120) as response:
+            archive.write_bytes(response.read())
+        extracted = temp_root / "extracted"
+        extracted.mkdir()
+        subprocess.run(["/usr/bin/ditto", "-x", "-k", str(archive), str(extracted)], check=True)
+        new_app = extracted / "Orbit.app"
+        executable = new_app / "Contents" / "MacOS" / "Orbit"
+        if not executable.exists():
+            raise RuntimeError("downloaded macOS Orbit.app is incomplete")
+
+        # Ask the visible app to close first.  If it is not responding, the
+        # bundle replacement remains safe because the service was stopped and
+        # the executable is held by the old process, not overwritten in place.
+        subprocess.run(
+            ["/usr/bin/osascript", "-e", 'tell application id "top.orbit.desktop" to quit'],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        time.sleep(0.5)
+        backup = temp_root / "Orbit.old.app"
+        if app_path.exists():
+            shutil.move(str(app_path), str(backup))
+        try:
+            shutil.move(str(new_app), str(app_path))
+        except Exception:
+            if backup.exists() and not app_path.exists():
+                shutil.move(str(backup), str(app_path))
+            raise
+        subprocess.Popen(["/usr/bin/open", "-a", str(app_path)], start_new_session=True)
+        return True
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
+
+
 def install_latest(info: UpdateInfo) -> int:
     if not info.available or not info.tag:
         return 0
@@ -120,7 +186,12 @@ def install_latest(info: UpdateInfo) -> int:
         script = _download_script("install.ps1", info.tag)
         return subprocess.call(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], env=env)
     script = _download_script("install.sh", info.tag)
-    return subprocess.call(["/bin/sh", str(script)], env=env)
+    code = subprocess.call(["/bin/sh", str(script)], env=env)
+    if code != 0:
+        return code
+    if platform.system() == "Darwin" and not _install_macos_app(info):
+        return 1
+    return 0
 
 
 def schedule_install(info: UpdateInfo) -> bool:
