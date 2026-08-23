@@ -643,6 +643,11 @@ class OrbitRuntime:
         estimated_updates_per_corpus = max(1, (estimated_sequences + effective_batch - 1) // effective_batch) if estimated_sequences else 0
         parameter_count = model.estimate_parameters()
         estimated_generated_tokens = text_bytes + (data_units * (AI_SAMPLE_TOKEN_ESTIMATE if requested_mode == "pretraining" else 512) if bool(payload.get("assisted")) or use_recommended_examples else 0)
+        # This is the optimizer-update coverage implied by the values currently
+        # visible in the form.  Keep it separate from the corpus estimate: a
+        # small corpus can be replayed for many steps, but that does not make it
+        # equivalent to seeing the same number of independent training tokens.
+        current_optimizer_tokens = requested_steps * requested_seq * requested_batch * requested_accum
         from_scratch_required_samples = math.ceil(target_pretraining_tokens / AI_SAMPLE_TOKEN_ESTIMATE)
         from_scratch_required_steps = math.ceil(target_pretraining_tokens / max(1, requested_seq * requested_batch * requested_accum))
         canonical_from_scratch_steps = math.ceil(target_pretraining_tokens / (1024 * 1 * 8))
@@ -790,11 +795,23 @@ class OrbitRuntime:
             "reference_rule": "Chinchilla ≈ 20 training tokens per parameter",
             "tokens_per_parameter_reference": CHINCHILLA_TOKENS_PER_PARAMETER,
             "recommended_tokens": reference_token_budget,
+            "final_calculated_tokens": current_optimizer_tokens,
+            "final_steps": requested_steps,
+            "final_seq_len": requested_seq,
+            "final_batch_size": requested_batch,
+            "final_grad_accum": requested_accum,
+            "final_formula": f"{requested_steps:,} × {requested_seq:,} × {requested_batch:,} × {requested_accum:,} = {current_optimizer_tokens:,}",
+            "scale_standard_tokens": nominal_parameters * CHINCHILLA_TOKENS_PER_PARAMETER,
+            "architecture_reference_tokens": parameter_count * CHINCHILLA_TOKENS_PER_PARAMETER,
             "data_rich_reference_tokens": round(planning_parameters * LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER),
             "data_rich_reference_tokens_per_parameter": round(LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER, 6),
             "requested_tokens": requested_token_budget or None,
             "target_tokens": target_pretraining_tokens,
             "tokens_per_parameter": round(target_pretraining_tokens / max(1, planning_parameters), 6),
+            "target_deviation_percent": round((target_pretraining_tokens / max(1, reference_token_budget) - 1) * 100, 6),
+            "final_deviation_percent": round((current_optimizer_tokens / max(1, nominal_parameters * CHINCHILLA_TOKENS_PER_PARAMETER) - 1) * 100, 6),
+            "final_vs_architecture_reference_percent": round((current_optimizer_tokens / max(1, parameter_count * CHINCHILLA_TOKENS_PER_PARAMETER) - 1) * 100, 6),
+            "architecture_vs_scale_standard_percent": round((parameter_count / max(1, nominal_parameters) - 1) * 100, 6),
             "formula": f"{planning_parameters:,} × {CHINCHILLA_TOKENS_PER_PARAMETER} = {reference_token_budget:,}",
             "data_rich_formula": f"{planning_parameters:,} × {LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER:.2f} ≈ {round(planning_parameters * LLAMA3_DATA_RICH_TOKENS_PER_PARAMETER):,}",
             "is_calculator_only": planning_parameters != nominal_parameters,
@@ -826,6 +843,8 @@ class OrbitRuntime:
                 "reference_tokens_per_parameter": CHINCHILLA_TOKENS_PER_PARAMETER,
                 "tokens_per_parameter": round(target_pretraining_tokens / max(1, planning_parameters), 6),
                 "optimizer_updates": config.steps,
+                "requested_optimizer_updates": requested_steps,
+                "optimizer_token_coverage": current_optimizer_tokens,
                 "target_coverage_percent": round(estimated_generated_tokens / max(1, target_pretraining_tokens) * 100, 6) if requested_mode == "pretraining" else None,
                 "from_scratch_required_samples": from_scratch_required_samples if requested_mode == "pretraining" else None,
                 "from_scratch_required_steps": from_scratch_required_steps if requested_mode == "pretraining" else None,

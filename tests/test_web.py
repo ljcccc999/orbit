@@ -24,6 +24,10 @@ def test_training_page_preserves_a_manually_entered_sample_count():
     assert "步 · 序列" in PAGE
     assert "个样本" in PAGE
     assert "viewGeneratedContent" in PAGE
+    assert "tokenFinalResult" in PAGE
+    assert "tokenResearchStandard" in PAGE
+    assert "越接近 0%" in PAGE
+    assert "最终计算结果" in PAGE
 
 
 def test_reset_form_balanced_recommendation_is_coupled_to_recommended_samples(tmp_path):
@@ -478,6 +482,26 @@ def test_training_token_budget_scales_with_model_and_accepts_custom_planning_cou
     assert custom["token_planning"]["is_calculator_only"] is True
     assert custom["token_planning"]["target_tokens"] == 6_000_000_000_000_000
     assert custom["token_planning"]["tokens_per_parameter"] == 20
+
+
+def test_training_token_result_uses_edited_steps_and_advanced_parameters(tmp_path):
+    runtime = OrbitRuntime(tmp_path)
+    recommendation = runtime.training_recommendation({
+        "preset": "300m",
+        "training_mode": "pretraining",
+        "optimization_goal": "balanced",
+        "steps": 2_000,
+        "seq_len": 512,
+        "batch_size": 1,
+        "grad_accum": 1,
+        "use_recommended_examples": False,
+    })
+    planning = recommendation["token_planning"]
+    assert planning["final_calculated_tokens"] == 1_024_000
+    assert planning["final_formula"] == "2,000 × 512 × 1 × 1 = 1,024,000"
+    assert planning["scale_standard_tokens"] == 6_000_000_000
+    assert planning["final_deviation_percent"] < -99.9
+    assert recommendation["training_advice"]["dataset_estimate"]["optimizer_token_coverage"] == 1_024_000
 
 
 def test_teacher_api_settings_persist_locally(tmp_path):
