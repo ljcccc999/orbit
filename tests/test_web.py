@@ -274,10 +274,19 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert '#chat .composer{position:absolute' in PAGE
     assert "originalWorkspace=$('codeWorkspace')?.closest('.field')" in PAGE
     assert "list.appendChild(originalWorkspace)" in PAGE
+    assert "showPage('code');newCodeSession()" in PAGE
     assert "--orbit-spring:cubic-bezier(.2,.82,.22,1)" in PAGE
+    assert "@supports(corner-shape:squircle)" in PAGE
+    assert "backdrop-filter:blur(48px) saturate(165%)" in PAGE
+    assert "#codeApi.page.active" in PAGE
     assert ".product-menu:not([hidden]){animation:orbitGlassIn" in PAGE
     assert "title.textContent=currentLang==='zh'?'训练历史':'Training history'" in PAGE
     assert "title.textContent=currentLang==='zh'?'Code 对话历史':'Code conversations'" in PAGE
+    assert 'id="toggleCodeCustomModel"' in PAGE
+    assert "['gpt-5.4','GPT-5.4 · 高能力']" in PAGE
+    assert "['claude-sonnet-5','Claude Sonnet 5 · 速度与能力']" in PAGE
+    assert "['deepseek-v4-flash','DeepSeek V4 Flash · 快速']" in PAGE
+    assert "function selectedCodeApiModel()" in PAGE
 
 
 def test_external_base_models_are_not_allowed_for_from_scratch_training(tmp_path):

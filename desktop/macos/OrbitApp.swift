@@ -106,6 +106,7 @@ private final class OrbitWebView: WKWebView {
 final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
+    private var splashBackdrop: NSView!
     private var splashLogo: LogoShineView!
     private var statusLabel: NSTextField!
     private var spinner: NSProgressIndicator!
@@ -113,6 +114,7 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
     private var systemIsShuttingDown = false
     private var pageLoadAttempts = 0
     private var pageLoadTask: Task<Void, Never>?
+    private var splashStartedAt = Date()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -190,7 +192,7 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
 
     private func buildWindow() {
         // Desktop-first default size close to the ChatGPT macOS window.
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.delegate = self
         window.title = "Orbit"
         window.titlebarAppearsTransparent = true
@@ -198,7 +200,7 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         window.center()
-        window.minSize = NSSize(width: 980, height: 640)
+        window.minSize = NSSize(width: 820, height: 560)
 
         let container = NSView(frame: window.contentView!.bounds)
         container.autoresizingMask = [.width, .height]
@@ -234,33 +236,44 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
             dragHandle.heightAnchor.constraint(equalToConstant: 28),
         ])
 
+        splashBackdrop = NSView(frame: container.bounds)
+        splashBackdrop.autoresizingMask = [.width, .height]
+        splashBackdrop.wantsLayer = true
+        splashBackdrop.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        container.addSubview(splashBackdrop)
+
         splashLogo = LogoShineView(frame: .zero)
         if let path = Bundle.main.path(forResource: "orbit-logo-transparent", ofType: "png") {
             splashLogo.image = NSImage(contentsOfFile: path)
         }
         splashLogo.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(splashLogo)
+        splashStartedAt = Date()
         splashLogo.startShine()
 
-        spinner = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 34, height: 34))
+        // Keep the loader as an internal compatibility object, but never put a
+        // progress indicator on the launch surface. Orbit starts as a brand
+        // moment: the mark, a restrained light pass, and the YUNSH signature.
+        spinner = NSProgressIndicator(frame: .zero)
         spinner.style = .spinning
-        spinner.startAnimation(nil)
-        statusLabel = NSTextField(labelWithString: "正在准备 Orbit…")
-        statusLabel.font = .systemFont(ofSize: 16, weight: .medium)
-        statusLabel.textColor = .secondaryLabelColor
+        spinner.isHidden = true
+        statusLabel = NSTextField(labelWithAttributedString: NSAttributedString(
+            string: "By YUNSH",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .kern: 1.7,
+            ]
+        ))
         statusLabel.alignment = .center
-        spinner.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(spinner)
         container.addSubview(statusLabel)
         NSLayoutConstraint.activate([
             splashLogo.widthAnchor.constraint(equalToConstant: 104),
             splashLogo.heightAnchor.constraint(equalToConstant: 104),
             splashLogo.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            splashLogo.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -106),
-            spinner.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -22),
-            statusLabel.topAnchor.constraint(equalTo: spinner.bottomAnchor, constant: 14),
+            splashLogo.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -70),
+            statusLabel.topAnchor.constraint(equalTo: splashLogo.bottomAnchor, constant: 118),
             statusLabel.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             statusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 30),
         ])
@@ -283,10 +296,13 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
     private func loadOrbitPage() {
         pageLoadTask?.cancel()
         pageLoadAttempts += 1
-        spinner.isHidden = false
-        spinner.startAnimation(nil)
+        splashLogo.isHidden = false
+        splashLogo.alphaValue = 1
+        splashLogo.startShine()
+        splashBackdrop.isHidden = false
+        splashBackdrop.alphaValue = 1
         statusLabel.isHidden = false
-        statusLabel.stringValue = pageLoadAttempts > 1 ? "页面加载失败，正在重试 Orbit…" : "正在加载 Orbit…"
+        statusLabel.alphaValue = 1
         webView.isHidden = true
 
         var request = URLRequest(url: orbitURL.appending(queryItems: [
@@ -301,10 +317,11 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
     private func retryOrbitPage(after error: Error) {
         webView.stopLoading()
         webView.isHidden = true
-        spinner.stopAnimation(nil)
-        spinner.isHidden = true
+        splashLogo.isHidden = false
+        splashLogo.startShine()
+        splashBackdrop.isHidden = false
+        splashBackdrop.alphaValue = 1
         statusLabel.isHidden = false
-        statusLabel.stringValue = "Orbit 页面暂时无法加载，正在重新连接本机服务…"
         pageLoadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled, let self else { return }
@@ -314,10 +331,9 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         Task { @MainActor in
-            self.spinner.isHidden = false
-            self.spinner.startAnimation(nil)
+            self.splashLogo.isHidden = false
+            self.splashLogo.startShine()
             self.statusLabel.isHidden = false
-            self.statusLabel.stringValue = "正在加载 Orbit…"
             self.webView.isHidden = true
         }
     }
@@ -325,12 +341,29 @@ final class OrbitApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavig
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageLoadTask?.cancel()
         pageLoadAttempts = 0
-        spinner.stopAnimation(nil)
-        spinner.isHidden = true
-        statusLabel.isHidden = true
         splashLogo.stopShine()
-        splashLogo.isHidden = true
+        webView.alphaValue = 1
         webView.isHidden = false
+        let remaining = max(0, 0.9 - Date().timeIntervalSince(splashStartedAt))
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining) { [weak self] in
+            self?.revealOrbitPage()
+        }
+    }
+
+    private func revealOrbitPage() {
+        guard !splashLogo.isHidden else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.24
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            splashBackdrop.animator().alphaValue = 0
+            splashLogo.animator().alphaValue = 0
+            statusLabel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            guard let self else { return }
+            self.splashBackdrop.isHidden = true
+            self.splashLogo.isHidden = true
+            self.statusLabel.isHidden = true
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
