@@ -287,6 +287,12 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert "['claude-sonnet-5','Claude Sonnet 5 · 速度与能力']" in PAGE
     assert "['deepseek-v4-flash','DeepSeek V4 Flash · 快速']" in PAGE
     assert "function selectedCodeApiModel()" in PAGE
+    assert 'id="showLocalConfig"' in PAGE
+    assert 'id="showApiConfig"' in PAGE
+    assert "function showCodeConfigPane(name)" in PAGE
+    assert 'font-family:"PingFang SC"' in PAGE
+    assert '.product-letter{display:block' in PAGE
+    assert '#codeApi.page.active{height:100%;min-height:0;overflow:hidden' in PAGE
 
 
 def test_external_base_models_are_not_allowed_for_from_scratch_training(tmp_path):
