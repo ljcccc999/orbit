@@ -732,6 +732,7 @@ class OrbitCodeAgent:
             tool_counts: dict[str, int] = {}
             for turn in range(intelligence["max_turns"]):
                 self._wait_until_resumed(stop, run_gate)
+                guidance_turn = bool(row.pop("_guidance_turn", False))
                 pending_model = row.pop("pending_model_change", None)
                 if isinstance(pending_model, dict):
                     row.setdefault("settings", {}).update(pending_model)
@@ -808,15 +809,29 @@ class OrbitCodeAgent:
                 message = str(reply.get("message", "")).strip()
                 phase = str(reply.get("phase", "update"))
                 if message:
-                    self._event(row, "assistant", title={"plan": "执行计划", "summary": "完成总结"}.get(phase, "阶段更新"), detail=message, phase=phase)
+                    self._event(
+                        row,
+                        "assistant",
+                        title="引导回答" if guidance_turn else {"plan": "执行计划", "summary": "完成总结"}.get(phase, "阶段更新"),
+                        detail=message,
+                        phase="guidance_reply" if guidance_turn else phase,
+                    )
                 actions = reply.get("actions", [])
                 if not isinstance(actions, list):
                     actions = []
                 history.append({"role": "assistant", "content": json.dumps(reply, ensure_ascii=False)})
                 steer = self._consume_directives(row, "steer")
                 if steer:
-                    user = "用户在执行中立即引导：\n" + "\n".join(steer) + "\n请据此重新规划，尚未执行的动作不要继续。"
+                    user = (
+                        "用户在执行中立即引导：\n"
+                        + "\n".join(steer)
+                        + "\n请先用自然语言回答这条引导，明确你理解了什么以及它如何影响当前任务；"
+                        "回答完成后，再从安全边界继续尚未执行的动作。不要跳过回答直接执行。"
+                    )
+                    row["_guidance_turn"] = True
                     history.append({"role": "user", "content": user})
+                    with self._lock:
+                        self._save(row)
                     continue
                 if reply.get("done") is True or not actions:
                     if intelligence["rank"] >= 3 and not inspection_requested and sum(tool_counts.get(name, 0) for name in ("list_files", "read_file", "search", "web_search")) == 0:

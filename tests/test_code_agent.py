@@ -64,7 +64,7 @@ def test_code_model_order_is_persisted_for_api_and_local_models(tmp_path):
 def test_code_creates_a_default_orbit_workspace_and_uses_shared_local_default(tmp_path):
     calls = []
 
-    def local_chat(prompt, **kwargs):
+    def local_chat(prompt, *args, **kwargs):
         calls.append((prompt, kwargs))
         return {"model": kwargs.get("model_id"), "content": "ok"}
 
@@ -214,6 +214,42 @@ def test_live_guidance_answers_before_queue_marker(tmp_path):
     assert events[-2]["phase"] == "guidance_reply"
     assert "先回答" in events[-2]["title"]
     assert events[-1]["mode"] == "steer"
+
+
+def test_live_guidance_requires_a_model_answer_before_continuing(tmp_path):
+    release_second_model_call = threading.Event()
+    second_model_call_started = threading.Event()
+    calls = []
+    responses = [
+        {"phase": "plan", "message": "先定位工作区。", "actions": [{"tool": "list_files", "path": "."}], "done": False},
+        {"phase": "update", "message": "收到引导。", "actions": [], "done": False},
+        {"phase": "summary", "message": "已回答引导并完成。", "actions": [], "done": True},
+    ]
+
+    def local_chat(prompt, *args, **kwargs):
+        calls.append(prompt)
+        if len(calls) == 2:
+            second_model_call_started.set()
+            release_second_model_call.wait(10)
+        return {"content": json.dumps(responses[len(calls) - 1], ensure_ascii=False)}
+
+    agent = OrbitCodeAgent(tmp_path / "code", local_chat, lambda: [])
+    started = agent.start({"prompt": "执行一个最小检查", "reasoning": "low", "workspace_auto": True})
+    assert second_model_call_started.wait(10)
+    agent.guide(started["id"], "先告诉我你发现了什么", "steer")
+    release_second_model_call.set()
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        current = agent.get(started["id"])
+        if current["status"] == "completed":
+            break
+        time.sleep(0.05)
+    current = agent.get(started["id"])
+    guidance_answers = [event for event in current["events"] if event.get("title") == "引导回答"]
+    assert current["status"] == "completed"
+    assert guidance_answers and guidance_answers[-1]["phase"] == "guidance_reply"
+    assert "先用自然语言回答" in calls[2]
 
 
 def test_revert_changes_restores_only_the_archived_session_state(tmp_path):
