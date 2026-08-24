@@ -330,6 +330,10 @@ def test_orbit_code_ui_contains_queue_progress_review_and_compact_tools():
     assert '<span>极高</span><span>最高</span><span>Ultra</span>' in PAGE
     assert "耗时和 token 也更多" in PAGE
     assert "renderThreeLevelCodeTimeline" in PAGE
+    assert "Orbit Code 正在检查目标" not in PAGE
+    assert "正在理解任务并准备执行计划" not in PAGE
+    assert "if(e.title==='正在理解任务'" in PAGE
+    assert "if(row.prompt){parts.push" in PAGE
     assert "code-stage" in PAGE
     assert ".diff-view-line.diff-add" in PAGE
     assert ".diff-view-line.diff-del" in PAGE

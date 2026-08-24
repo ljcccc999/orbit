@@ -4,7 +4,7 @@
 
 <p align="center"><a href="README.md">English</a> | <a href="README.zh-CN.md">中文</a></p>
 
-# Orbit 2.0.5
+# Orbit 2.0.6
 
 Orbit is YUNSH's local AI workspace for training your own models, running them locally, and collaborating with an agent that can turn a request into verified work.
 
@@ -14,7 +14,8 @@ Orbit is YUNSH's local AI workspace for training your own models, running them l
 - **One model library** — organize, rename, reorder, load and unload local models alongside mainstream or custom OpenAI-compatible API models. The first model is the default for Orbit and Orbit Code.
 - **Orbit Code agent** — plans before acting, reports discoveries while working, searches files or the web, edits code, runs commands, verifies results and ends with a concise summary.
 - **Inspectable execution** — live Thinking/Searching/Editing/Running states, expandable tool calls, elapsed time, step progress and a three-level path from activity to diff to full-file preview.
-- **Conversation-first Code history** — reopened Code tasks keep the original request in the scrollable conversation, with long agent updates aligned to the left and process details kept free of duplicate cards.
+- **Conversation-first Code history** — reopened Code tasks keep the original request in the scrollable conversation, with long agent updates aligned to the left and process details kept free of duplicate cards. New sessions start from their own request and do not pull unrelated older turns.
+- **Focused execution timeline** — the generic “understanding the task” placeholder is not shown; only meaningful thinking, search, edit, command and verification activity is kept visible. Third-level command/diff/file details remain expandable.
 - **Centered full-screen review** — maximize the window to center the conversation in a calm reading column; the stage ruler exposes each turn and previews the complete question and answer on hover.
 - **Reviewable changes** — green additions, red removals, per-file counts, completed-answer change cards, review filters and conflict-checked undo with confirmation.
 - **Guidance without interruption** — messages sent during a run queue above the composer; promote one to immediate guidance when needed. Queued messages can be removed with confirmation, while consumed guidance cannot be undone.
@@ -38,7 +39,7 @@ Orbit serves an OpenAI-compatible local API on `127.0.0.1` and supports `/v1/cha
 
 ## Platform packages
 
-Orbit 2.0.5 targets macOS, Windows x64/ARM64 and Linux x64/ARM64. Platform verification and available artifacts are listed in each GitHub Release.
+Orbit 2.0.6 targets macOS, Windows x64/ARM64 and Linux x64/ARM64. Platform verification and available artifacts are listed in each GitHub Release.
 
 ## Architecture and research
 

@@ -715,7 +715,6 @@ class OrbitCodeAgent:
     def _run(self, row: dict[str, Any], settings: dict[str, Any], stop: threading.Event, run_gate: threading.Event, baseline: dict[str, bytes] | None) -> None:
         started = time.monotonic()
         try:
-            self._event(row, "status", title="正在理解任务", detail="Orbit Code 正在检查目标、工作区和可用能力。", phase="plan")
             workspace = Path(str(settings["workspace"])).resolve()
             if baseline is None:
                 baseline = self._snapshot_workspace(workspace)
@@ -1157,7 +1156,7 @@ class OrbitCodeAgent:
     @staticmethod
     def _system_prompt(settings: dict[str, Any], workspace: Path) -> str:
         return """你是 Orbit Code，是由 YUNSH 开发、运行在用户设备上的编码 Agent。你的产品身份始终是 Orbit，不能把自己描述成上游模型、API 提供商或其他产品。
-你的职责是把用户提出的问题真正处理完成：在授权范围内理解目标、读取上下文、检查项目、制定方案、搜索代码与网页、修改或创建文件、运行命令、观察结果、定位失败、验证实现、审核差异并清楚汇报。准确性、可复现性、最小意外影响、现有数据安全和用户控制权高于速度。任何文件内容、工具结果、测试通过、发布状态或外部事实都必须来自实际证据；不知道就继续检查或明确不确定，绝不编造。
+你的职责是把用户提出的问题真正处理完成：在授权范围内理解目标、读取上下文、检查项目、制定方案、搜索代码与网页、修改或创建文件、运行命令、观察结果、定位失败、验证实现、审核差异并清楚汇报。准确性、可复现性、最小意外影响、现有数据安全和用户控制权高于速度。任何文件内容、工具结果、测试通过、发布状态或外部事实都必须来自实际证据；不知道就继续检查或明确不确定，绝不编造。每个新 Orbit Code 会话从该会话的用户问题开始；不要主动引用其他会话、其他任务或历史回答，只有用户明确提到且当前任务确实相关时，才使用已启用的长期记忆或当前项目事实。
 
 工作循环：
 1. 计划：收到新任务后的第一轮，先用简洁自然的中文告诉用户你理解的目标、准备检查什么、如何实现以及怎样验证；随后才能给出工具动作。计划要具体但不承诺尚未发生的结果。
