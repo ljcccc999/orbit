@@ -371,11 +371,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.code.approve(path.split("/")[4], data.get("approved") is True))
             elif path.startswith("/api/code/sessions/") and path.endswith("/stop"):
                 self._json(202, self.server.runtime.code.stop(path.split("/")[4]))
+            elif path.startswith("/api/code/sessions/") and path.endswith("/pause"):
+                self._json(202, self.server.runtime.code.toggle_pause(path.split("/")[4]))
             elif path.startswith("/api/code/sessions/") and path.endswith("/revert"):
                 self._json(200, self.server.runtime.code.revert_changes(path.split("/")[4]))
             elif path.startswith("/api/code/sessions/") and path.endswith("/guide"):
                 self._json(202, self.server.runtime.code.guide(
                     path.split("/")[4], str(data.get("prompt", "")), str(data.get("mode", "queue")),
+                    data.get("model_change") if isinstance(data.get("model_change"), dict) else None,
                 ))
             elif path.startswith("/api/code/sessions/") and path.endswith("/guide-update"):
                 self._json(200, self.server.runtime.code.update_guidance(

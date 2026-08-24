@@ -264,7 +264,7 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert 'class="code-process-inline" hidden' in PAGE
     assert 'id="composerAdvancedToggle"' in PAGE
     assert 'const codeSourceField=' in PAGE
-    assert "$('codeAdvanced').textContent=modelText" in PAGE
+    assert "$('codeAdvanced').textContent=orbitShortModelName()" in PAGE
     assert "function configureContextualSidebar(mode)" in PAGE
     assert ".sidebar.mode-training>.nav button[data-page=\"community\"]" in PAGE
     assert ".sidebar.mode-orbit>.nav button[data-page=\"community\"]" not in PAGE

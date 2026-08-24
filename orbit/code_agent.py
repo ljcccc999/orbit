@@ -20,7 +20,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 
-_RUNNING = {"planning", "running", "waiting_approval"}
+_RUNNING = {"planning", "running", "paused", "waiting_approval"}
 _WRITE_TOOLS = {"apply_patch", "shell"}
 _SAFE_COMMAND = re.compile(r"^[A-Za-z0-9_./:@%+=,\-\s'\"|&()\[\]{}*?!<>;$`\\]+$")
 _BLOCKED_SHELL = re.compile(
@@ -75,6 +75,8 @@ class OrbitCodeAgent:
         self._sessions: dict[str, dict[str, Any]] = {}
         self._workers: dict[str, threading.Thread] = {}
         self._stops: dict[str, threading.Event] = {}
+        self._run_gates: dict[str, threading.Event] = {}
+        self._approval_events: dict[tuple[str, str], threading.Event] = {}
 
     def _defaults(self) -> dict[str, Any]:
         return {
@@ -463,12 +465,23 @@ class OrbitCodeAgent:
             "pending_approval": None,
             "directives": [],
         }
+        previous_model = str(payload.get("previous_model", "")).strip()
+        selected_model = str(settings.get("model") or settings.get("active_profile_id") or "Orbit")
+        if previous_model and previous_model != selected_model:
+            self._event(
+                row, "model_change", title="已更换模型",
+                detail=f"{previous_model} → {selected_model}；本轮消息从新模型开始执行。",
+                phase="update",
+            )
         baseline = None  # computed inside the worker thread so start() returns immediately
         stop = threading.Event()
-        worker = threading.Thread(target=self._run, args=(row, settings, stop, baseline), name=f"orbit-code-{session_id[:8]}", daemon=True)
+        run_gate = threading.Event()
+        run_gate.set()
+        worker = threading.Thread(target=self._run, args=(row, settings, stop, run_gate, baseline), name=f"orbit-code-{session_id[:8]}", daemon=True)
         with self._lock:
             self._sessions[session_id] = row
             self._stops[session_id] = stop
+            self._run_gates[session_id] = run_gate
             self._workers[session_id] = worker
             self._save(row)
         worker.start()
@@ -502,6 +515,7 @@ class OrbitCodeAgent:
         return rows
 
     def approve(self, session_id: str, approved: bool) -> dict[str, Any]:
+        restart: tuple[dict[str, Any], dict[str, Any], threading.Event] | None = None
         with self._lock:
             row = self._sessions.get(session_id)
             if row is None:
@@ -511,9 +525,65 @@ class OrbitCodeAgent:
             if not isinstance(pending, dict):
                 raise ValueError("当前没有待批准操作")
             pending["decision"] = "approved" if approved else "denied"
-            row["status"] = "running"
+            row["status"] = "running" if approved else "stopped"
             self._event(row, "approval_decision", title="已批准" if approved else "已拒绝", detail=pending.get("summary", ""))
+            wake = self._approval_events.get((session_id, str(pending.get("id", ""))))
+            if wake is not None:
+                wake.set()
+            elif approved:
+                # A service/App update can outlive the persisted approval card
+                # while the daemon thread that was waiting for it is gone.  Do
+                # not pretend that setting `decision=approved` resumed work:
+                # rebuild the worker and grant exactly one matching tool action.
+                row["resume_approval"] = {
+                    "tool": str(pending.get("tool", "")),
+                    "summary": str(pending.get("summary", "")),
+                }
+                row["pending_approval"] = None
+                row["status"] = "planning"
+                settings = self._runtime_settings_for_row(row)
+                stop = threading.Event()
+                run_gate = threading.Event()
+                run_gate.set()
+                worker = threading.Thread(
+                    target=self._run,
+                    args=(row, settings, stop, run_gate, None),
+                    name=f"orbit-code-{session_id[:8]}-resume",
+                    daemon=True,
+                )
+                self._stops[session_id] = stop
+                self._run_gates[session_id] = run_gate
+                self._workers[session_id] = worker
+                restart = (row, settings, stop)
+                self._save(row)
+            else:
+                row["pending_approval"] = None
+                self._event(row, "status", title="已停止", detail="用户拒绝了待批准操作。", phase="summary")
+                self._save(row)
+        if restart is not None:
+            self._workers[session_id].start()
         return self.get(session_id)
+
+    def _runtime_settings_for_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Restore secrets and current provider details for a persisted run."""
+        settings = self._load_settings()
+        saved = row.get("settings", {})
+        if isinstance(saved, dict):
+            for key, value in saved.items():
+                if value is not None:
+                    settings[key] = value
+        if settings.get("provider") == "api":
+            profile_id = str(settings.get("active_profile_id", ""))
+            profile = next(
+                (item for item in self._load_settings().get("profiles", []) if item.get("id") == profile_id),
+                None,
+            )
+            if profile:
+                settings.update(
+                    base_url=profile["base_url"], model=profile["model"], api_key=profile["api_key"],
+                    api_format=profile.get("api_format", "openai"), active_profile_id=profile_id,
+                )
+        return settings
 
     def stop(self, session_id: str) -> dict[str, Any]:
         with self._lock:
@@ -527,7 +597,31 @@ class OrbitCodeAgent:
                 self._event(row, "status", title="正在停止", detail="会在当前工具动作的安全边界停止，并保留已经完成的步骤和文件修改。")
         return self.get(session_id)
 
-    def guide(self, session_id: str, prompt: str, mode: str) -> dict[str, Any]:
+    def toggle_pause(self, session_id: str) -> dict[str, Any]:
+        """Pause or resume at the next safe model/tool boundary."""
+        with self._lock:
+            row = self._sessions.get(session_id)
+            gate = self._run_gates.get(session_id)
+            if row is None or gate is None or row.get("status") not in _RUNNING:
+                raise FileNotFoundError("找不到可暂停的 Orbit Code 会话")
+            if row.get("status") == "paused":
+                gate.set()
+                row["status"] = "running"
+                self._event(row, "status", title="已继续运行", detail="Orbit Code 已从安全边界继续执行。", phase="update")
+            else:
+                gate.clear()
+                row["status"] = "paused"
+                self._event(row, "status", title="已暂停", detail="当前动作完成后停在安全边界；再次点击即可继续。", phase="update")
+            self._save(row)
+        return self.get(session_id)
+
+    @staticmethod
+    def _wait_until_resumed(stop: threading.Event, run_gate: threading.Event) -> None:
+        while not run_gate.wait(0.1):
+            if stop.is_set():
+                raise InterruptedError("用户停止了任务")
+
+    def guide(self, session_id: str, prompt: str, mode: str, model_change: dict[str, Any] | None = None) -> dict[str, Any]:
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("引导内容不能为空")
@@ -542,6 +636,22 @@ class OrbitCodeAgent:
                 raise ValueError("该任务已经结束，不能继续引导")
             directive_id = secrets.token_hex(8)
             row.setdefault("directives", []).append({"id": directive_id, "mode": mode, "prompt": prompt, "time": _stamp(), "consumed": False, "deleted": False})
+            if isinstance(model_change, dict):
+                current = row.get("settings", {}) if isinstance(row.get("settings"), dict) else {}
+                wanted = {
+                    key: model_change.get(key) for key in
+                    ("provider", "model", "active_profile_id", "api_format")
+                    if model_change.get(key) is not None
+                }
+                before = str(current.get("model") or current.get("active_profile_id") or "Orbit")
+                after = str(wanted.get("model") or wanted.get("active_profile_id") or "Orbit")
+                if wanted and (before != after or current.get("provider") != wanted.get("provider")):
+                    row["pending_model_change"] = wanted
+                    self._event(
+                        row, "model_change", title="已更换模型",
+                        detail=f"{before} → {after}；从这条引导之后使用新模型。",
+                        phase="update",
+                    )
             self._event(
                 row,
                 "guidance",
@@ -587,7 +697,7 @@ class OrbitCodeAgent:
             self._save(row)
         return self.get(session_id)
 
-    def _run(self, row: dict[str, Any], settings: dict[str, Any], stop: threading.Event, baseline: dict[str, bytes] | None) -> None:
+    def _run(self, row: dict[str, Any], settings: dict[str, Any], stop: threading.Event, run_gate: threading.Event, baseline: dict[str, bytes] | None) -> None:
         started = time.monotonic()
         try:
             self._event(row, "status", title="正在理解任务", detail="Orbit Code 正在检查目标、工作区和可用能力。", phase="plan")
@@ -606,8 +716,40 @@ class OrbitCodeAgent:
             inspection_requested = False
             tool_counts: dict[str, int] = {}
             for turn in range(intelligence["max_turns"]):
+                self._wait_until_resumed(stop, run_gate)
+                pending_model = row.pop("pending_model_change", None)
+                if isinstance(pending_model, dict):
+                    row.setdefault("settings", {}).update(pending_model)
+                    settings.update(self._runtime_settings_for_row(row))
+                    instruction = self._system_prompt(settings, workspace)
+                    with self._lock:
+                        self._save(row)
                 if stop.is_set():
                     raise InterruptedError("用户停止了任务")
+                history_chars = sum(len(item.get("content", "")) for item in history)
+                if len(history) > 12 and history_chars > 48_000:
+                    compacting = self._event(
+                        row, "context_compaction", title="正在自动精简上下文",
+                        detail="正在保留关键事实、文件变化、工具结果与未完成事项。",
+                        status="running", phase="update",
+                    )
+                    with self._lock:
+                        self._save(row)
+                    older, recent = history[:-6], history[-6:]
+                    digest_parts = []
+                    for item in older:
+                        content = " ".join(str(item.get("content", "")).split())
+                        if content:
+                            digest_parts.append(f"{item.get('role', 'context')}: {content[:900]}")
+                    digest = "\n".join(digest_parts)[-12_000:]
+                    history = [{"role": "user", "content": "此前执行上下文的自动精简摘要（保留事实、决策、文件、结果和未完成项）：\n" + digest}, *recent]
+                    compacting.update(
+                        title="已自动精简上下文",
+                        detail="Orbit Code 已保留关键事实、文件变化、工具结果和未完成事项，并移除重复的早期记录以降低后续 token 消耗。",
+                        status="completed",
+                    )
+                    with self._lock:
+                        self._save(row)
                 thinking_started = time.monotonic()
                 thinking = self._event(
                     row, "thinking", title="正在思考", detail="正在根据任务、当前观察和用户引导决定下一步。",
@@ -617,15 +759,37 @@ class OrbitCodeAgent:
                     raw = self._model_interruptible(
                         instruction, user, history, settings, attachments if turn == 0 else [], stop,
                     )
-                    thinking.update(title="已思考", status="completed", duration_ms=_elapsed(thinking_started))
                     with self._lock:
+                        # “正在思考”只是一条临时的实时状态，不应在历史时间线里
+                        # 变成“已思考”并反复堆积。真正的工具、阶段更新和最终
+                        # 回答会继续保留，整轮耗时由完成摘要统一展示。
+                        if thinking in row.get("events", []):
+                            row["events"].remove(thinking)
                         self._save(row)
                 except Exception:
-                    thinking.update(title="思考已停止" if stop.is_set() else "思考失败", status="stopped" if stop.is_set() else "failed", duration_ms=_elapsed(thinking_started))
                     with self._lock:
+                        if thinking in row.get("events", []):
+                            row["events"].remove(thinking)
                         self._save(row)
                     raise
-                reply = self._parse_reply(raw)
+                parse_error: Exception | None = None
+                reply: dict[str, Any] | None = None
+                for correction_attempt in range(3):
+                    try:
+                        reply = self._parse_reply(raw)
+                        break
+                    except RuntimeError as exc:
+                        parse_error = exc
+                        if correction_attempt >= 2:
+                            raise
+                        history.append({"role": "assistant", "content": raw})
+                        raw = self._model_interruptible(
+                            instruction,
+                            "上一条回复不符合 Orbit Code 的 JSON 协议。不要解释、不要使用 Markdown；只返回包含 phase、message、actions、done 的一个有效 JSON 对象。",
+                            history, settings, [], stop,
+                        )
+                if reply is None:
+                    raise RuntimeError(str(parse_error or "模型没有返回有效协议"))
                 message = str(reply.get("message", "")).strip()
                 phase = str(reply.get("phase", "update"))
                 if message:
@@ -668,6 +832,7 @@ class OrbitCodeAgent:
                     )
                     self._save(row)
                 for action in actions[:intelligence["max_actions"]]:
+                    self._wait_until_resumed(stop, run_gate)
                     if stop.is_set():
                         raise InterruptedError("用户停止了任务")
                     if not isinstance(action, dict):
@@ -704,7 +869,20 @@ class OrbitCodeAgent:
             self._event(row, "status", title="已停止", detail=str(exc), phase="summary")
         except Exception as exc:
             row["status"] = "failed"
-            self._event(row, "error", title="执行失败", detail=str(exc), phase="summary")
+            error_text = str(exc)
+            lowered = error_text.lower()
+            quota_markers = (
+                "insufficient_quota", "quota", "余额不足", "额度不足", "额度已用完",
+                "billing", "payment required", "credit balance", "rate limit exceeded",
+            )
+            if any(marker in lowered for marker in quota_markers):
+                self._event(
+                    row, "error", title="API 额度已用完",
+                    detail="当前 API Key 没有可用额度，Orbit Code 已安全暂停。请更换 API 配置或前往对应服务商充值后继续。\n\n" + error_text,
+                    phase="summary", error_code="api_quota_exhausted",
+                )
+            else:
+                self._event(row, "error", title="执行失败", detail=error_text, phase="summary")
         finally:
             row["duration_ms"] = _elapsed(started)
             row["changes"] = self._workspace_changes(Path(str(settings["workspace"])), baseline)
@@ -968,6 +1146,9 @@ class OrbitCodeAgent:
 - 用户的批准模式必须生效。需要请求批准时停止在安全边界，不绕过确认；完全访问也不等于允许无关、破坏性或不可恢复操作。撤销或删除排队消息要确认；已提升为即时引导并消费的消息不可撤销。
 - 运行中收到引导消息时，先回答这条引导如何影响当前工作，再在安全动作边界调整后续执行；不要中断已经安全运行的独立命令。普通消息默认排队，原任务总结完成后再处理。
 - 处理文件修改时，为每个文件记录新增、删除、修改状态与行数；可用时保留 diff，让界面能够以绿色显示新增、红色显示删除。新文件全部算新增，删除文件全部算删除。最终提供可审核的文件清单。
+- 每一批工具动作之前都必须先给出可见的 plan 或 update，说明这一批要做什么以及原因；工具完成后，如果得到新发现、完成一个子目标、改变方案或即将进入验证，下一轮先给 update 再调用下一批工具。普通批次控制在 2–4 个紧密相关动作，避免把长任务的全部搜索、编辑和测试塞进同一批。这样界面按“阶段说明 → 可展开的工具汇总 → 下一阶段说明”交错展示，而不是连续堆积日志。
+- 阶段更新必须是一段能独立读懂、具有实际信息量的说明，通常用 3–6 句（中文约 90–260 字）交代：刚确认的事实或新发现、证据来自哪里、它对当前任务的影响、这一阶段已经完成什么，以及紧接着要验证或修改什么。不要只写“正在检查”“继续执行”“已修改文件”这类一行状态；也不要把命令清单复述成正文，或泄露隐藏思维链。复杂任务应像成熟工程师的工作记录一样多次出现完整阶段更新，并与每批可展开工具记录交错；简单任务不为凑数量制造空话。
+- 阶段说明之后的 actions 只收纳这一段实际对应的读取、搜索、命令或编辑。等这些动作取得结果后，下一轮先写新的完整 update，再给下一批 actions。最终 summary 是唯一真正的最终回答：先给明确结果，再给关键改动、验证证据、文件统计和仍未验证的边界；不要用阶段 update 代替最终总结。
 - 设计和界面任务要以清晰层级、可读性、直接操作、键盘可达、可滚动、减少动效和系统一致性为准；不能只改截图效果而破坏导航、焦点、历史、响应式布局或实际点击路径。
 - 发现项目已有测试、发布清单、双语文档、版本流程或记忆规则时，将它们视为任务的一部分；但没有用户授权不得擅自发布、删除远程资产、添加协作者或发送外部消息。
 - 为提高提示缓存命中率，保持这份稳定身份与规则在前，动态任务、项目上下文、长期记忆、插件和附件只放在用户消息末端；不要在每一轮重复重排稳定规则。节省 token 不能以跳过必要证据和验证为代价。
@@ -1178,17 +1359,34 @@ JSON 规则：phase 只能是 plan、update 或 summary；message 是直接给�
             (permission == "ask" and outside)
             or (permission == "workspace" and high_risk)
         )
+        preapproved = False
+        resume_approval = row.get("resume_approval")
+        if requires_approval and isinstance(resume_approval, dict) and str(resume_approval.get("tool", "")) == tool:
+            approved_summary = str(resume_approval.get("summary", "")).strip()
+            if not approved_summary or approved_summary in summary or summary in approved_summary:
+                preapproved = True
+                requires_approval = False
+                row["resume_approval"] = None
+                with self._lock:
+                    self._save(row)
         if requires_approval:
             approval_id = secrets.token_hex(8)
-            pending = {"id": approval_id, "summary": summary, "tool": tool, "decision": None}
+            pending = {"id": approval_id, "summary": summary, "tool": tool, "action": action, "decision": None}
+            approval_ready = threading.Event()
             with self._lock:
                 row["pending_approval"] = pending
                 row["status"] = "waiting_approval"
+                self._approval_events[(row["id"], approval_id)] = approval_ready
                 self._event(row, "approval", title="请求批准", detail=summary, tool=tool, approval_id=approval_id)
-            while pending["decision"] is None:
-                if stop.wait(0.15):
+            while not approval_ready.wait(0.15):
+                if stop.is_set():
+                    with self._lock:
+                        self._approval_events.pop((row["id"], approval_id), None)
                     raise InterruptedError("用户停止了任务")
-            row["pending_approval"] = None
+            with self._lock:
+                self._approval_events.pop((row["id"], approval_id), None)
+                row["pending_approval"] = None
+                self._save(row)
             if pending["decision"] != "approved":
                 return {"tool": tool, "ok": False, "error": "用户拒绝了操作"}
         event = self._event(
@@ -1202,7 +1400,7 @@ JSON 规则：phase 只能是 plan、update 或 summary；message 是直接给�
                 raise PermissionError("设置中尚未允许 Orbit Code 操控电脑")
             # Auto-review may approve a routine action outside the project. In
             # Ask mode the same elevation only happens after the user approves.
-            elevated = permission == "full" or (outside and permission == "workspace") or requires_approval
+            elevated = permission == "full" or (outside and permission == "workspace") or requires_approval or preapproved
             output = self._execute(action, workspace, "full" if elevated else permission)
             result = {"tool": tool, "ok": True, "output": output[-20_000:], "duration_ms": _elapsed(started), "event_id": event["id"]}
             event.update(detail=result["output"] or "完成", status="completed", duration_ms=result["duration_ms"])

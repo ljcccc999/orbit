@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbit-ai"
-version = "2.0.0"
+version = "2.0.1"
 description = "Orbit: local model training, chat, and an OpenAI-compatible API in one browser interface."
 readme = "README.md"
 requires-python = ">=3.10"

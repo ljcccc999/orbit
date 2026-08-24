@@ -1,6 +1,8 @@
 import hashlib
 import json
 import subprocess
+import threading
+import time
 import urllib.error
 import urllib.request
 from io import BytesIO
@@ -110,6 +112,95 @@ def test_permissions_keep_web_search_separate_from_shell_network_and_workspace(t
     assert agent._action_is_high_risk({"tool": "apply_patch", "patch": "--- /dev/null\n+++ b/new.txt"}) is False
 
 
+def test_approval_wakes_waiting_action_and_execution_continues(monkeypatch, tmp_path):
+    agent = _agent(tmp_path / "code")
+    session_id = "e" * 24
+    row = {
+        "id": session_id,
+        "status": "running",
+        "events": [],
+        "updated_at": "",
+        "pending_approval": None,
+    }
+    agent._sessions[session_id] = row
+    agent._save(row)
+    monkeypatch.setattr(agent, "_execute", lambda *_args: "continued after approval")
+    result = {}
+
+    worker = threading.Thread(
+        target=lambda: result.update(agent._execute_with_policy(
+            row,
+            {"tool": "shell", "command": "curl https://example.com", "summary": "访问外部网络"},
+            {"permission": "ask", "computer_control": False},
+            tmp_path,
+            threading.Event(),
+        )),
+        daemon=True,
+    )
+    worker.start()
+    deadline = time.monotonic() + 2
+    while row["pending_approval"] is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert row["status"] == "waiting_approval"
+    approved = agent.approve(session_id, True)
+    assert approved["status"] == "running"
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert result["ok"] is True
+    assert result["output"] == "continued after approval"
+    assert row["pending_approval"] is None
+    assert row["events"][-1]["status"] == "completed"
+
+
+def test_approval_restarts_a_persisted_wait_without_a_live_worker(monkeypatch, tmp_path):
+    agent = _agent(tmp_path / "code")
+    session_id = "a" * 24
+    row = {
+        "id": session_id, "title": "resume", "prompt": "continue", "status": "waiting_approval",
+        "events": [], "updated_at": "", "settings": {"workspace": str(agent.workspace_root)},
+        "pending_approval": {"id": "old", "summary": "访问外部文件", "tool": "read_file", "decision": None},
+    }
+    agent._sessions[session_id] = row
+    agent._save(row)
+    resumed = threading.Event()
+
+    def fake_run(restored, settings, stop, run_gate, baseline):
+        assert restored["resume_approval"] == {"tool": "read_file", "summary": "访问外部文件"}
+        assert settings["workspace"] == str(agent.workspace_root)
+        assert run_gate.is_set()
+        resumed.set()
+
+    monkeypatch.setattr(agent, "_run", fake_run)
+    approved = agent.approve(session_id, True)
+
+    assert approved["status"] == "planning"
+    assert approved["pending_approval"] is None
+    assert resumed.wait(2)
+
+
+def test_code_pause_and_resume_use_the_same_safe_run_gate(tmp_path):
+    agent = _agent(tmp_path / "code")
+    session_id = "a" * 24
+    row = {"id": session_id, "status": "running", "events": [], "updated_at": ""}
+    gate = threading.Event()
+    gate.set()
+    agent._sessions[session_id] = row
+    agent._run_gates[session_id] = gate
+    agent._save(row)
+
+    paused = agent.toggle_pause(session_id)
+    assert paused["status"] == "paused"
+    assert not gate.is_set()
+    assert paused["events"][-1]["title"] == "已暂停"
+
+    resumed = agent.toggle_pause(session_id)
+    assert resumed["status"] == "running"
+    assert gate.is_set()
+    assert resumed["events"][-1]["title"] == "已继续运行"
+
+
 def test_revert_changes_restores_only_the_archived_session_state(tmp_path):
     workspace = tmp_path / "project"
     workspace.mkdir()
@@ -206,7 +297,9 @@ def test_orbit_code_ui_contains_queue_progress_review_and_compact_tools():
     assert "允许操控鼠标和键盘" in PAGE
     assert "释放本机 API 端口" in PAGE
     assert "formatCodeElapsed" in PAGE
-    assert "用时 " in PAGE
+    assert "已耗时 " in PAGE
+    assert "if(bar)bar.hidden=true" in PAGE
+    assert "event.phase==='summary'" in PAGE
     assert "codeStageActionLabel" in PAGE
     assert "codeRunningActionLabel" in PAGE
     assert "正在查询文件/代码" in PAGE
@@ -216,6 +309,17 @@ def test_orbit_code_ui_contains_queue_progress_review_and_compact_tools():
     assert "code-stage-message" in PAGE
     assert "编辑 ${counts.modified} 个文件" in PAGE
     assert "搜索网页 ${web} 次" in PAGE
+    assert "previousScroll" in PAGE
+    assert "timeline.scrollTop=wasNearBottom?timeline.scrollHeight:previousScroll" in PAGE
+    assert "已批准，Orbit Code 正在继续执行" in PAGE
+    assert "if(event.kind==='approval_decision')return ''" in PAGE
+    assert "请求批准 · 等待批准" in PAGE
+    assert ".approval-box,.code-stage,.tool-run-group,.tool-run-row" in PAGE
+    assert ".step-ring:before{display:none}" in PAGE
+    assert 'border-radius:999px!important' in PAGE
+    assert 'border-radius:50%!important;background:#fff!important' in PAGE
+    assert '-webkit-app-region:no-drag!important;cursor:pointer!important' in PAGE
+    assert "showPage('chat');newConversation()" in PAGE
 
 
 def test_long_term_memory_keeps_completed_task_summaries_not_file_bodies(tmp_path):
@@ -252,6 +356,7 @@ def test_intelligence_levels_scale_execution_and_token_budgets(tmp_path):
     assert "只有没有可靠命令行/API 路径" in agent._system_prompt({"reasoning": "max"}, tmp_path)
     assert "你的产品身份始终是 Orbit" in agent._system_prompt({"reasoning": "max"}, tmp_path)
     assert "由 YUNSH 开发" in agent._system_prompt({"reasoning": "max"}, tmp_path)
+    assert "阶段说明 → 可展开的工具汇总 → 下一阶段说明" in agent._system_prompt({"reasoning": "max"}, tmp_path)
 
 
 def test_plugins_are_local_toggleable_and_injected_as_context(tmp_path):

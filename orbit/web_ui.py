@@ -68,6 +68,8 @@ function copyText(text){navigator.clipboard.writeText(text).then(()=>toast(t('co
 async function checkForUpdates(){const button=$('checkUpdates');button.disabled=true;$('updateStatus').textContent=t('updateChecking');try{const info=await request('/api/update/check');if(info.error)throw new Error(info.error);if(!info.available){$('updateStatus').textContent=t('upToDate');return}$('updateStatus').textContent=`${info.current_version} → ${info.latest_version}`;toast(t('updateAvailable').replace('{version}',info.latest_version))}catch(e){$('updateStatus').textContent=t('updateFailed').replace('{error}',e.message);toast(e.message)}finally{button.disabled=false}}async function installFromSidebar(){const button=$('installUpdates');button.disabled=true;$('updateStatus').textContent=t('updateChecking');try{const info=await request('/api/update/check');if(info.error)throw new Error(info.error);if(!info.available){$('updateStatus').textContent=t('upToDate');return}const promptText=t('updateAvailable').replace('{version}',info.latest_version);if(!confirm(promptText)){$('updateStatus').textContent=`${info.current_version} → ${info.latest_version}`;return}const result=await request('/api/update/install',{method:'POST',body:'{}'});const queued=result.status==='queued_after_training';const message=t(queued?'updateQueued':'updateInstalling');$('updateStatus').textContent=message;toast(message);if(!queued)setTimeout(()=>location.reload(),5000)}catch(e){$('updateStatus').textContent=t('updateFailed').replace('{error}',e.message);toast(e.message)}finally{button.disabled=false}}$('checkUpdates').onclick=checkForUpdates;$('installUpdates').onclick=installFromSidebar;
 (async()=>{applyLanguage();const page=['chat','models','train','runs','community','api','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'chat';showPage(page);try{await refreshSystem();await refreshRuns();await refreshCommunity();await refreshHub();await refreshConversations();if(!currentConversation){const rows=await request('/api/conversations');if(rows.length)await openConversation(eid(rows[0].id));else await newConversation()}if(['preparing','generating','running','stopping'].includes(system.training.status))startPolling();if(['queued','loading'].includes(system.loading.status))startLoadingPoll()}catch(e){toast(e.message)}})();setInterval(()=>{if(document.visibilityState!=='hidden')refreshSystem().catch(()=>{})},5000);
 </script></body></html>'''
+
+
 PAGE = PAGE.replace(
     "function renderKeys(rows){",
     """$('startTraining').onclick=async()=>{try{await request('/api/training/start',{method:'POST',body:JSON.stringify(trainPayload())});resetTrainingForm();toast(t('trainingStarted'));startPolling()}catch(e){toast(e.message)}};$('autoTraining').onclick=async()=>{if(lastRecommendation&&!lastRecommendation.feasible&&!confirm(currentLang==='zh'?'当前内存不足以安全训练。Orbit 可以先生成并保存样本，之后释放内存再继续训练。是否继续？':'There is not enough safe training memory. Orbit can generate and save the dataset first, then resume after memory is released. Continue?'))return;const p={...trainPayload(),teacher_provider:currentTeacherProvider,teacher_profile_id:$('teacherProfile').value,api_key:$('teacherKey').value,teacher_base_url:$('teacherUrl').value,teacher_model:$('teacherModel').value,instruction:$('teacherInstruction').value,examples:+$('teacherExamples').value,language:$('teacherLanguage').value,acknowledge_cost:$('teacherAck').checked};try{await request('/api/training/auto',{method:'POST',body:JSON.stringify(p)});resetTrainingForm();toast(t('generating'));startPolling()}catch(e){toast(e.message)}};async function resumeTraining(){try{await request('/api/training/resume',{method:'POST',body:'{}'});resetTrainingForm();toast(t('trainingStarted'));startPolling()}catch(e){toast(e.message)}}$('stopTraining').onclick=async()=>{try{await request('/api/training/stop',{method:'POST',body:'{}'});startPolling()}catch(e){toast(e.message)}};async function createRemoteBundle(assisted){let payload=trainPayload();if(assisted){const instruction=$('teacherInstruction').value.trim();if(!instruction){toast(currentLang==='zh'?'请先填写 AI 训练目标。':'Describe the AI training goal first.');return}const presetRow=(system.presets||[]).find(x=>x.preset===$('preset').value)||{};payload={...payload,ai_assisted:true,assistant:{provider:$('teacherProvider').value,base_url:$('teacherUrl').value,model:$('teacherModel').value,instruction,examples:+$('teacherExamples').value||20,language:$('teacherLanguage').value,model_profile:{preset:$('preset').value,parameters:presetRow.parameters||0}}}}try{const d=await request('/api/jobs',{method:'POST',body:JSON.stringify(payload)});toast(t('remoteReady'));location.href=d.download}catch(e){toast(e.message)}}$('createRemote').onclick=()=>createRemoteBundle(false);$('createRemoteAI').onclick=()=>createRemoteBundle(true);$('loadActiveModel').onclick=loadActiveModel;$('unloadModel').onclick=async()=>{try{const d=await request('/api/models/unload',{method:'POST',body:'{}'});await refreshSystem();toast(d.status==='already_unloaded'?(currentLang==='zh'?'模型本来就没有加载；后台 API 仍会保持轻量运行。':'No model was loaded; the lightweight API remains running.'):(currentLang==='zh'?`已卸载 ${d.previous_model}，释放约 ${(d.released_bytes/1073741824).toFixed(2)}GB。`:`Unloaded ${d.previous_model}; released about ${d.released_bytes} GB.`))}catch(e){toast(e.message)}};$('refreshModels').onclick=refreshSystem;$('preset').onchange=scheduleRecommendation;$('device').onchange=scheduleRecommendation;$('teacherExamples').onchange=scheduleRecommendation;$('corpus').oninput=scheduleRecommendation;$('teacherInstruction').oninput=scheduleRecommendation;
@@ -135,6 +137,153 @@ PAGE = PAGE.replace(
 PAGE = PAGE.replace(
     "</style>",
     ".orbit-status-button{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 9px 4px 5px;background:rgba(255,255,255,.66);color:var(--ink);font-size:11px;font-weight:700;-webkit-app-region:no-drag}.orbit-status-button img{width:20px;height:20px;object-fit:contain}.orbit-status-button:hover{background:rgba(255,255,255,.9)}.content,.page,.layout,.panel,#train,.training-content,.run-list,.run-detail,.messages,.community-detail,.community-list{-webkit-app-region:no-drag}</style>",
+    1,
+)
+
+# Final Orbit 2.0 interaction contract. Keep this as the last generated layer:
+# all referenced controls and renderers have been installed above it.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+:root{--orbit-accent:#0a84ff;--orbit-accent-rgb:10,132,255}.app{grid-template-columns:291px minmax(0,1fr)!important}.sidebar{width:291px!important;box-shadow:none!important}.main{box-shadow:none!important}
+body.orbit-settings-active .app{grid-template-columns:0 minmax(0,1fr)!important}body.orbit-settings-active .sidebar{visibility:hidden!important;width:0!important;overflow:hidden!important}body.orbit-settings-active .content{padding:0!important}body.orbit-settings-active .topbar{display:none!important}
+#settings.page.active{height:100vh!important}.settings-workspace{grid-template-columns:291px minmax(0,1fr)!important;margin:0!important}.settings-directory{padding:54px 15px 20px!important;background:rgba(224,231,240,.48)!important;backdrop-filter:blur(52px) saturate(180%)!important;-webkit-back-filter:blur(52px) saturate(180%)!important}.settings-main{padding:46px 48px 80px!important}
+#chat .messages{width:100%!important;padding:38px clamp(22px,4vw,58px) 154px!important;gap:14px!important;overscroll-behavior:contain!important;scroll-behavior:auto!important}#chat .bubble{width:auto!important;max-width:none!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:var(--ink)!important;line-height:1.62!important;text-align:left!important;white-space:pre-wrap!important}#chat .bubble.assistant{align-self:stretch!important;margin-right:clamp(0px,3vw,44px)!important}#chat .bubble.user{align-self:flex-end!important;max-width:min(72%,720px)!important;padding:10px 14px!important;border:1px solid rgba(255,255,255,.82)!important;border-radius:16px 16px 6px 16px!important;background:linear-gradient(145deg,rgba(239,242,247,.88),rgba(218,225,235,.68))!important;backdrop-filter:blur(28px) saturate(155%)!important;-webkit-backdrop-filter:blur(28px) saturate(155%)!important;box-shadow:inset 0 1px rgba(255,255,255,.92)!important}
+#chat .thinking-bubble{display:flex!important;align-items:center!important;gap:8px!important;color:#737b86!important;font-size:13px!important}.thinking-dot{width:7px;height:7px;border-radius:50%;background:var(--orbit-accent);animation:orbitThinking 1.1s ease-in-out infinite}.turn-elapsed{align-self:stretch;color:#737b86;font-size:12px;border-bottom:1px solid rgba(62,72,89,.08);padding:1px 0 9px}@keyframes orbitThinking{50%{opacity:.28;transform:scale(.72)}}
+body.orbit-window-maximized #chat .messages{padding-left:max(48px,calc((100% - 820px)/2))!important;padding-right:max(48px,calc((100% - 820px)/2))!important}body.orbit-window-maximized #chat .bubble.assistant{margin-right:0!important}#chat .composer{border-color:rgba(255,255,255,.82)!important;background:linear-gradient(145deg,rgba(255,255,255,.74),rgba(226,233,242,.58))!important;backdrop-filter:blur(42px) saturate(180%)!important;-webkit-backdrop-filter:blur(42px) saturate(180%)!important;box-shadow:inset 0 1px rgba(255,255,255,.94)!important}#sendButton,.send-or-guide,#codeSend{background:var(--orbit-accent)!important}
+.jump-latest{position:absolute;z-index:20;left:50%;bottom:144px;display:none;transform:translateX(-50%);width:34px;height:34px;border:1px solid rgba(255,255,255,.88);border-radius:50%;background:rgba(244,247,251,.8);backdrop-filter:blur(24px);box-shadow:0 7px 20px rgba(32,42,58,.1);cursor:pointer}.jump-latest.visible{display:grid;place-items:center}.theme-accent-row{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:58px;margin:14px 0;padding:8px 0;border-top:1px solid rgba(55,65,82,.08)}.theme-accent-row span{display:grid;gap:3px}.theme-accent-row small{color:var(--muted)}.accent-swatches{display:flex;gap:8px}.accent-swatches button{width:25px;height:25px;padding:0;border:2px solid rgba(255,255,255,.9);border-radius:50%;background:var(--swatch);box-shadow:0 0 0 1px rgba(45,55,72,.1);cursor:pointer}.accent-swatches button.active{box-shadow:0 0 0 2px var(--swatch),inset 0 0 0 2px rgba(255,255,255,.9)}.turn-ruler{left:297px!important}
+@media(max-width:960px){.app{grid-template-columns:261px minmax(0,1fr)!important}.sidebar{width:261px!important}.settings-workspace{grid-template-columns:261px minmax(0,1fr)!important}}@media(max-width:700px){#chat .bubble.user{max-width:88%!important}.settings-main{padding:28px 22px 70px!important}}@media(prefers-reduced-motion:reduce){.thinking-dot{animation:none!important}}
+''' + "</style>",
+    1,
+)
+
+# Keep product switching and the primary sidebar action stable after opening
+# plugin/model drawers.  Mode-specific DOM is reused, so bind once through
+# capture/event delegation instead of relying on stale per-button handlers.
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+(function installStablePrimarySidebarAction(){
+  const side=document.querySelector('.sidebar');
+  if(!side||side.dataset.primaryActionBound==='1')return;
+  side.dataset.primaryActionBound='1';
+  side.addEventListener('click',event=>{
+    const button=event.target.closest('.nav button[data-page="chat"]');
+    if(!button||!side.contains(button))return;
+    event.preventDefault();event.stopImmediatePropagation();
+    document.getElementById('codePluginDrawer')?.classList.remove('open');
+    document.getElementById('productMenu').hidden=true;
+    const mode=String(typeof orbitWorkspaceMode==='string'?orbitWorkspaceMode:'orbit');
+    if(mode==='code'){showPage('code');newCodeSession();return}
+    if(mode==='training'){showPage('train');document.getElementById('modelName')?.focus();return}
+    showPage('chat');newConversation();
+  },true);
+})();
+''' + "</script></body></html>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+window.addEventListener('DOMContentLoaded',()=>{
+function orbitAtBottom(surface){return !surface||surface.scrollHeight-surface.scrollTop-surface.clientHeight<72}function orbitUpdateJump(){const b=$('orbitJumpLatest'),s=$('messages');if(b&&s)b.classList.toggle('visible',!orbitAtBottom(s))}function orbitFollowChat(force=false){const s=$('messages');if(!s)return;if(force||orbitAtBottom(s))requestAnimationFrame(()=>{s.scrollTop=s.scrollHeight;orbitUpdateJump()})}
+if(!$('orbitJumpLatest')){const b=document.createElement('button');b.id='orbitJumpLatest';b.className='jump-latest';b.textContent='↓';b.title=currentLang==='zh'?'回到最新消息':'Jump to latest';b.onclick=()=>orbitFollowChat(true);document.querySelector('#chat .chat-panel')?.appendChild(b)}$('messages')?.addEventListener('scroll',orbitUpdateJump,{passive:true});
+addMessage=function(role,text){const s=$('messages'),follow=orbitAtBottom(s);s.querySelector('.identity')?.remove();const value=String(text||''),n=document.createElement('div');n.className=`bubble ${role}`;const body=document.createElement('span');body.className='bubble-copy-text';body.textContent=value;n.appendChild(body);if(role==='user'){const copy=document.createElement('button');copy.type='button';copy.className='message-copy';copy.textContent=currentLang==='zh'?'复制':'Copy';copy.title=currentLang==='zh'?'复制消息':'Copy message';copy.onclick=async event=>{event.preventDefault();event.stopPropagation();try{await navigator.clipboard.writeText(value);copy.textContent=currentLang==='zh'?'已复制':'Copied';setTimeout(()=>{copy.textContent=currentLang==='zh'?'复制':'Copy'},1200)}catch{toast(currentLang==='zh'?'复制失败，请重试。':'Copy failed; try again.')}};n.appendChild(copy)}s.appendChild(n);if(follow)orbitFollowChat(true);else orbitUpdateJump();renderTurnRuler();return n};addThinkingMessage=function(){const s=$('messages'),follow=orbitAtBottom(s),n=document.createElement('div');n.className='bubble assistant thinking-bubble';n.dataset.started=String(performance.now());n.innerHTML=`<span class="thinking-dot"></span><span>${currentLang==='zh'?'正在思考':'Thinking'}</span>`;s.appendChild(n);if(follow)orbitFollowChat(true);return n};finishThinking=function(n,response){const s=$('messages'),follow=orbitAtBottom(s),elapsed=Math.max(0,performance.now()-Number(n?.dataset.started||performance.now()));n?.remove();const meta=document.createElement('div');meta.className='turn-elapsed';const seconds=Math.max(1,Math.round(elapsed/1000));meta.textContent=currentLang==='zh'?`耗时 ${seconds} 秒`:`Took ${seconds}s`;s.appendChild(meta);addMessage('assistant',String(response?.content||'—'));if(follow)orbitFollowChat(true)};
+openConversation=async function(encoded){try{const s=$('messages'),row=await request(`/api/conversations/${eid(decodeURIComponent(encoded))}`);currentConversation=row.id;s.innerHTML=row.messages.length?'':identityCard();for(const m of row.messages)addMessage(m.role,m.content);if(!row.messages.length)$('askIdentity').onclick=()=>sendPrompt(t('identityAnswer'));s.scrollTop=s.scrollHeight;orbitUpdateJump();await refreshConversations();renderTurnRuler()}catch(e){toast(e.message)}};
+const orbitFinalShowPage=showPage;showPage=function(name){document.body.classList.toggle('orbit-settings-active',name==='settings');return orbitFinalShowPage(name)};
+function orbitHexRgb(hex){const v=String(hex).replace('#','');return `${parseInt(v.slice(0,2),16)},${parseInt(v.slice(2,4),16)},${parseInt(v.slice(4,6),16)}`}function applyOrbitAccent(value){const accent=value||localStorage.getItem('orbit-accent')||'#0a84ff';document.documentElement.style.setProperty('--orbit-accent',accent);document.documentElement.style.setProperty('--orbit-accent-rgb',orbitHexRgb(accent));localStorage.setItem('orbit-accent',accent);document.querySelectorAll('.accent-swatches button').forEach(x=>x.classList.toggle('active',x.dataset.accent===accent))}function installOrbitAccentSetting(){const main=document.querySelector('.settings-main .panel-pad');if(!main||document.querySelector('.theme-accent-row'))return;const row=document.createElement('div');row.className='theme-accent-row';row.innerHTML=`<span><b>${currentLang==='zh'?'主题强调色':'Accent color'}</b><small>${currentLang==='zh'?'用于发送按钮、进度与关键状态':'Used for send buttons, progress, and key states'}</small></span><span class="accent-swatches">${['#0a84ff','#5856d6','#30b0c7','#34c759','#ff9f0a','#ff375f'].map(c=>`<button type="button" data-accent="${c}" style="--swatch:${c}" aria-label="${c}"></button>`).join('')}</span>`;row.querySelectorAll('button').forEach(b=>b.onclick=()=>applyOrbitAccent(b.dataset.accent));main.prepend(row);applyOrbitAccent()}installOrbitAccentSetting();applyOrbitAccent();
+const orbitFinalRenderCodeSession=renderCodeSession;renderCodeSession=function(row){const s=$('codeTimeline'),follow=orbitAtBottom(s),top=s?.scrollTop||0;orbitFinalRenderCodeSession(row);requestAnimationFrame(()=>{if(!s)return;s.scrollTop=follow?s.scrollHeight:top;renderTurnRuler()})};
+});
+''' + "</script></body></html>",
+    1,
+)
+
+# Unified progress glass, readable links, and recoverable API quota state.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+.code-progress-strip{gap:0!important;min-height:42px!important;margin-bottom:9px!important;padding:5px 7px!important;border-radius:15px!important;background:rgba(246,249,253,.68)!important;backdrop-filter:blur(34px) saturate(190%)!important;-webkit-backdrop-filter:blur(34px) saturate(190%)!important;box-shadow:inset 0 1px rgba(255,255,255,.9)!important}
+.code-progress-strip .step-pill{padding:4px 9px!important}.step-caption{color:var(--muted);font-size:11px}.progress-divider{width:1px;height:20px;margin:0 3px;background:rgba(70,81,99,.1)}.code-progress-strip .change-pill{min-height:30px;padding:4px 9px;border:0;border-radius:9px;background:transparent;font-size:12px}.code-progress-strip .change-pill:hover{background:rgba(255,255,255,.5)}
+.code-rich-link{color:#3473ba;text-decoration:none;font-weight:560}.code-rich-link:hover{text-decoration:underline}.code-rich-link[data-url]{position:relative}.code-rich-link[data-url]:hover:after{content:attr(data-url);position:absolute;z-index:90;left:50%;bottom:calc(100% + 8px);max-width:430px;padding:7px 9px;border-radius:8px;background:#17191d;color:#fff;font-size:11px;font-weight:450;line-height:1.35;white-space:normal;word-break:break-all;transform:translateX(-50%);box-shadow:0 8px 24px rgba(0,0,0,.2)}
+.api-quota-event{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;margin:7px 0 16px 0;padding:4px 0}.api-quota-icon{display:grid;place-items:center;width:26px;height:26px;border:1.5px solid #d58921;border-radius:50%;color:#bd7210;font-size:15px;font-weight:750}.api-quota-copy b{display:block;font-size:14px}.api-quota-copy p{margin:3px 0 9px;color:var(--muted);font-size:12px;line-height:1.5}.api-quota-actions{display:flex;gap:7px}.api-quota-actions button{min-height:31px;padding:5px 10px}
+''' + "</style>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+function codeRichText(value){
+  let source=String(value||''),links=[];
+  source=source.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,(_,label,url)=>{const key=`\u0000${links.length}\u0000`;links.push({label,url});return key});
+  source=source.replace(/https?:\/\/[^\s<>()]+/g,url=>{const clean=url.replace(/[.,，。；;!?！？]+$/,'');const key=`\u0000${links.length}\u0000`;let label='查看来源';try{const parsed=new URL(clean);const path=decodeURIComponent(parsed.pathname).split('/').filter(Boolean).pop();label=path?`查看 ${path.replace(/[-_]+/g,' ').slice(0,42)}`:`查看 ${parsed.hostname.replace(/^www\./,'')}`}catch{}links.push({label,url:clean});return key+url.slice(clean.length)});
+  let html=esc(source).replace(/\n/g,'<br>');
+  links.forEach((link,index)=>{const token=esc(`\u0000${index}\u0000`);html=html.replace(token,`<a class="code-rich-link" href="${esc(link.url)}" data-url="${esc(link.url)}" target="_blank" rel="noreferrer">${esc(link.label)}</a>`)});
+  return html;
+}
+const _orbitQuotaEventRenderer=renderCodeEvent;
+renderCodeEvent=function(event,row){
+  if(event?.error_code==='api_quota_exhausted'||(event?.kind==='error'&&/额度已用完|insufficient_quota|credit balance|payment required/i.test(String(event.title||'')+' '+String(event.detail||'')))){
+    return `<div class="api-quota-event"><span class="api-quota-icon">!</span><span class="api-quota-copy"><b>${currentLang==='zh'?'API Key 额度已用完':'API credit is exhausted'}</b><p>${currentLang==='zh'?'Orbit Code 已安全暂停。更换可用 API，或为当前服务商充值后即可继续。':'Orbit Code paused safely. Replace the API or add credit with the provider to continue.'}</p><span class="api-quota-actions"><button class="button primary" onclick="openUnifiedModelLibrary()">${currentLang==='zh'?'更换 API':'Replace API'}</button><button class="button" onclick="openUnifiedModelLibrary()">${currentLang==='zh'?'充值与配置':'Billing & settings'}</button></span></span></div>`;
+  }
+  return _orbitQuotaEventRenderer(event,row);
+};
+''' + "</script></body></html>",
+    1,
+)
+
+# Orbit settings use a full workspace with their own glass directory. The
+# persistent sidebar exposes settings from the user menu, matching desktop app
+# hierarchy instead of keeping a permanent settings row among task history.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+.side-settings-button{display:none!important}.sidebar-user{position:relative!important;cursor:pointer!important;-webkit-app-region:no-drag!important}.sidebar-user:after{content:'⌄';margin-left:auto;color:#7d8591;font-size:11px}.orbit-user-menu{position:absolute;z-index:100;left:10px;right:10px;bottom:72px;padding:7px;border:1px solid rgba(255,255,255,.86);border-radius:16px;background:linear-gradient(145deg,rgba(250,251,253,.94),rgba(230,235,243,.82));backdrop-filter:blur(42px) saturate(180%);-webkit-backdrop-filter:blur(42px) saturate(180%);box-shadow:0 18px 48px rgba(28,36,50,.14)}.orbit-user-menu button{display:flex;align-items:center;gap:9px;width:100%;min-height:38px;padding:7px 9px;border:0;border-radius:10px;background:transparent;color:#2a3038;text-align:left}.orbit-user-menu button:hover{background:rgba(255,255,255,.62)}
+#settings.page.active{display:block!important;height:100%!important;max-width:none!important;overflow:hidden!important}.settings-workspace{display:grid;grid-template-columns:220px minmax(0,1fr);height:100%;min-height:0;margin:-24px -30px -30px}.settings-directory{min-height:0;padding:25px 12px 18px;border-right:1px solid rgba(255,255,255,.62);background:rgba(231,236,243,.42);backdrop-filter:blur(46px) saturate(170%);-webkit-backdrop-filter:blur(46px) saturate(170%)}.settings-directory h2{margin:0 10px 18px;font-size:20px;font-weight:640}.settings-directory button{display:flex;align-items:center;gap:9px;width:100%;min-height:38px;padding:8px 10px;border:0;border-radius:10px;background:transparent;color:#4d5561;text-align:left}.settings-directory button:hover,.settings-directory button.active{background:rgba(255,255,255,.56);color:#222831}.settings-main{min-height:0;overflow-y:auto;padding:28px 38px 70px;-webkit-app-region:no-drag}.settings-main>.panel{width:min(760px,100%)!important;margin:0 auto!important;border:0!important;background:transparent!important;backdrop-filter:none!important;box-shadow:none!important}.settings-main>.panel>.panel-head{padding-left:0!important;padding-right:0!important}.settings-main>.panel>.panel-pad{padding-left:0!important;padding-right:0!important}.settings-code-defaults{margin-top:24px;padding-top:20px;border-top:1px solid rgba(55,65,82,.09)}.settings-code-defaults h3{margin:0 0 3px;font-size:15px}.settings-code-defaults>p{margin:0 0 12px;color:#747c88;font-size:12px}.settings-default-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.settings-default-row{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:66px;padding:10px 12px;border:1px solid rgba(55,65,82,.08);border-radius:13px;background:rgba(255,255,255,.34)}.settings-default-row>span{display:grid;gap:2px}.settings-default-row b{font-size:13px;font-weight:580}.settings-default-row small{color:#747c88;font-size:11px}.settings-default-row select,.settings-default-row input[type=text]{width:min(225px,50%)}.settings-default-row input[type=checkbox]{width:36px!important;height:21px!important}.settings-model-link{grid-column:1/-1}.settings-model-link button{margin-left:auto}@media(max-width:820px){.settings-workspace{grid-template-columns:170px minmax(0,1fr)}.settings-main{padding-left:22px;padding-right:22px}.settings-default-grid{grid-template-columns:1fr}.settings-model-link{grid-column:auto}}
+#code .code-composer{overflow:visible!important;border-radius:20px!important}#codeAdvanced{min-width:0!important;padding:0 7px!important;background:transparent!important;border:0!important;box-shadow:none!important;font-size:13px!important;font-weight:430!important;letter-spacing:-.012em!important}.composer-setting{position:relative!important}.composer-setting>select{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}.composer-cascade{display:none;position:absolute;z-index:90;right:calc(100% + 9px);top:-7px;width:260px;max-height:330px;padding:7px;border:1px solid rgba(255,255,255,.86);border-radius:16px;background:rgba(244,247,251,.94);backdrop-filter:blur(42px) saturate(180%);box-shadow:0 18px 50px rgba(27,35,49,.15);overflow:auto}.composer-setting:hover>.composer-cascade,.composer-setting:focus-within>.composer-cascade{display:grid}.composer-cascade button{display:flex;justify-content:space-between;width:100%;min-height:36px;padding:7px 9px;border:0;border-radius:10px;background:transparent;color:#292e36;text-align:left}.composer-cascade button:hover{background:rgba(255,255,255,.68)}.composer-cascade button.selected:after{content:'✓'}
+''' + "</style>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+function orbitShortModelName(){const text=String($('codeModel')?.selectedOptions[0]?.textContent||'Orbit').replace(/ ·.*/, '').trim();const known=['DeepSeek','OpenAI','Kimi','GLM','Qwen','Claude','Gemini','MiniMax','Orbit'];return known.find(name=>text.toLowerCase().includes(name.toLowerCase()))||text.split(/[\s\-_/]/)[0]||'Orbit'}
+function refreshComposerShortName(){$('codeAdvanced').textContent=orbitShortModelName()}
+function rebuildComposerCascades(){['codeModel','codeSpeed'].forEach(id=>{const select=$(id),row=select?.closest('.composer-setting');if(!select||!row)return;row.querySelector('.composer-cascade')?.remove();const panel=document.createElement('div');panel.className='composer-cascade';panel.innerHTML=[...select.options].map(option=>`<button type="button" class="${option.value===select.value?'selected':''}" data-value="${esc(option.value)}">${esc(option.textContent)}</button>`).join('');panel.querySelectorAll('button').forEach(button=>button.onclick=event=>{event.stopPropagation();select.value=button.dataset.value;select.dispatchEvent(new Event('change',{bubbles:true}));rebuildComposerCascades();refreshComposerShortName()});row.appendChild(panel)})}
+const _orbitRealRefreshSettings=refreshCodeSettings;refreshCodeSettings=async function(){const result=await _orbitRealRefreshSettings();refreshComposerShortName();rebuildComposerCascades();syncSettingsDefaults();return result};
+if($('codeAdvanced'))$('codeAdvanced').addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();const panel=$('codeAdvancedPanel');panel.hidden=!panel.hidden;if(!panel.hidden){refreshComposerShortName();rebuildComposerCascades()}},{capture:true});
+
+function installSettingsWorkspace(){
+  const page=document.getElementById('settings'),legacyLayout=page?.querySelector(':scope > .layout');
+  const panel=legacyLayout?.querySelector(':scope > .panel')||page?.querySelector(':scope > .panel');
+  if(!page||!panel||page.querySelector('.settings-workspace'))return;
+  const shell=document.createElement('div');shell.className='settings-workspace';
+  const directory=document.createElement('nav');directory.className='settings-directory';
+  directory.innerHTML='<button class="settings-back" type="button">‹ 返回应用</button><h2>设置</h2><button class="active" data-settings-target="settingsGeneral">⌁ 常规</button><button data-settings-target="settingsCodeDefaults">⌘ Orbit Code</button><button data-settings-target="settingsMemory">◉ 记忆</button><button data-settings-target="settingsUpdates">↓ 更新与后台</button>';
+  const main=document.createElement('div');main.className='settings-main';
+  panel.remove();
+  page.replaceChildren(shell);shell.append(directory,main);main.appendChild(panel);
+  const pad=panel.querySelector('.panel-pad')||panel;
+  const code=document.createElement('section');code.id='settingsCodeDefaults';code.className='settings-code-defaults';
+  code.innerHTML=`<h3>Orbit Code 默认设置</h3><p>输入栏只做本轮快捷调整；这里决定以后新任务使用的默认值。</p><div class="settings-default-grid"><label class="settings-default-row"><span><b>默认权限</b><small>新任务开始时使用</small></span><select id="settingsDefaultPermission"><option value="ask">请求批准</option><option value="workspace">替我批准</option><option value="full">完全访问</option></select></label><label class="settings-default-row"><span><b>默认智能</b><small>越高会执行更多搜索、检查和验证</small></span><select id="settingsDefaultReasoning"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最高</option><option value="ultra">Ultra</option></select></label><label class="settings-default-row"><span><b>默认速度</b><small>平衡响应与执行深度</small></span><select id="settingsDefaultSpeed"><option value="fast">快速</option><option value="balanced">标准</option><option value="quality">质量优先</option></select></label><label class="settings-default-row"><span><b>默认工作区</b><small>留空使用 Orbit 自动工作区</small></span><input id="settingsDefaultWorkspace" type="text" placeholder="自动 Orbit 工作区"></label><label class="settings-default-row"><span><b>本地上下文</b><small>读取工作区结构和说明</small></span><input id="settingsDefaultLocalContext" type="checkbox"></label><div class="settings-default-row settings-model-link"><span><b>API 与模型</b><small>列表第一项是 Orbit 与 Orbit Code 的默认模型</small></span><button class="button" id="settingsOpenModels">管理模型</button></div></div>`;
+  pad.appendChild(code);$('settingsOpenModels').onclick=()=>openUnifiedModelLibrary();
+  ['settingsDefaultPermission','settingsDefaultReasoning','settingsDefaultSpeed','settingsDefaultWorkspace','settingsDefaultLocalContext'].forEach(id=>$(id).onchange=saveSettingsDefaults);
+  const memoryControls=pad.querySelector('.memory-controls');
+  if(memoryControls&&!document.getElementById('settingsMemory')){const anchor=document.createElement('span');anchor.id='settingsMemory';anchor.className='settings-section-anchor';memoryControls.before(anchor)}
+  const operational=pad.querySelector('.operational-settings');
+  if(operational&&!document.getElementById('settingsUpdates')){const anchor=document.createElement('span');anchor.id='settingsUpdates';anchor.className='settings-section-anchor';operational.before(anchor)}
+  // The panel may itself be the original #settings page in legacy markup.
+  // Never rename it: showPage('settings') depends on that stable route id.
+  if(!$('settingsGeneral')){const anchor=document.createElement('span');anchor.id='settingsGeneral';anchor.className='settings-section-anchor';panel.prepend(anchor)}
+  // Keep the settings workspace reversible.  `orbitCurrentMode` was never a
+  // live state variable, so the old handler threw before showPage ran.
+  directory.querySelector('.settings-back').onclick=()=>{const mode=typeof orbitWorkspaceMode==='string'?orbitWorkspaceMode:'orbit';showPage(mode==='code'?'code':mode==='training'?'train':'chat')};
+  directory.querySelectorAll('[data-settings-target]').forEach(button=>button.onclick=()=>{directory.querySelectorAll('[data-settings-target]').forEach(item=>item.classList.toggle('active',item===button));const target=$(button.dataset.settingsTarget);if(button.dataset.settingsTarget==='settingsGeneral')main.scrollTo({top:0,behavior:'smooth'});else target?.scrollIntoView({behavior:'smooth',block:'start'})});
+}
+function syncSettingsDefaults(){if(!$('settingsDefaultPermission')||!codeSettings)return;$('settingsDefaultPermission').value=codeSettings.permission||'ask';$('settingsDefaultReasoning').value=codeSettings.reasoning||'medium';$('settingsDefaultSpeed').value=codeSettings.speed||'balanced';$('settingsDefaultWorkspace').value=codeSettings.workspace_auto===false?(codeSettings.workspace||''):'';$('settingsDefaultLocalContext').checked=codeSettings.local_context!==false}
+async function saveSettingsDefaults(){const workspace=$('settingsDefaultWorkspace').value.trim();try{codeSettings=await request('/api/code/settings',{method:'POST',body:JSON.stringify({permission:$('settingsDefaultPermission').value,reasoning:$('settingsDefaultReasoning').value,speed:$('settingsDefaultSpeed').value,workspace,workspace_auto:!workspace,local_context:$('settingsDefaultLocalContext').checked})});await refreshCodeSettings();toast('默认设置已保存。')}catch(error){toast(error.message)}}
+function installOrbitUserMenu(){const user=document.querySelector('.sidebar-user');if(!user||$('orbitUserMenu'))return;const menu=document.createElement('div');menu.id='orbitUserMenu';menu.className='orbit-user-menu';menu.hidden=true;menu.innerHTML='<button id="openSettingsFromUser">⚙ <span>设置</span></button>';document.querySelector('.sidebar').appendChild(menu);user.onclick=event=>{event.stopPropagation();menu.hidden=!menu.hidden};$('openSettingsFromUser').onclick=()=>{menu.hidden=true;showPage('settings')};document.addEventListener('click',event=>{if(!event.target.closest('.sidebar-user')&&!event.target.closest('.orbit-user-menu'))menu.hidden=true})}
+installSettingsWorkspace();installOrbitUserMenu();refreshComposerShortName();rebuildComposerCascades();setTimeout(syncSettingsDefaults,0);
+''' + "</script></body></html>",
     1,
 )
 
@@ -269,22 +418,22 @@ function toggleInlineCodeProcess(button){const body=button.parentElement.querySe
 renderCodeProcessState=function(){const timeline=$('codeTimeline');if(timeline)timeline.classList.remove('process-collapsed')};
 const _orbitConversationRenderSession=renderCodeSession;
 renderCodeSession=function(row){
-  const timeline=$('codeTimeline'),wasNearBottom=timeline.scrollHeight-timeline.scrollTop-timeline.clientHeight<110;
+  const timeline=$('codeTimeline'),previousScroll=timeline.scrollTop,wasNearBottom=timeline.scrollHeight-timeline.scrollTop-timeline.clientHeight<110;
   _orbitConversationRenderSession(row);
   const running=codeIsRunning(row),events=row.events||[],summary=[...events].reverse().find(e=>e.kind==='assistant'&&e.phase==='summary'),full=renderThreeLevelCodeTimeline(row)||'<div class="code-empty"><div><b>正在开始</b><span>Orbit Code 正在理解任务。</span></div></div>';
   if(running){timeline.innerHTML=full+codeInlineProgress(row)}else{
-    const summaryHtml=summary?`<div class="code-final-summary">${esc(summary.detail||summary.title||'')}</div>`:'';
-    timeline.innerHTML=`<button class="code-elapsed" aria-expanded="false" onclick="toggleInlineCodeProcess(this)"><span>${currentLang==='zh'?'用时 ':'Time '}${formatCodeElapsed(row.duration_ms||0)}</span><span>›</span></button>${summaryHtml}${codeChangeActions(row)}${codeCompletedFiles(row)}<div class="code-process-inline" hidden>${full}${codeInlineProgress(row)}</div>`;
+    const summaryHtml=summary?`<div class="code-final-summary">${codeRichText(summary.detail||summary.title||'')}</div>`:'';
+    timeline.innerHTML=`<button class="code-elapsed" aria-expanded="false" onclick="toggleInlineCodeProcess(this)"><span>${currentLang==='zh'?'已耗时 ':'Ran for '}${formatCodeElapsed(row.duration_ms||0)}</span><span>›</span></button>${summaryHtml}<div class="code-process-inline" hidden>${full}${codeChangeActions(row)}${codeCompletedFiles(row)}${codeInlineProgress(row)}</div>`;
   }
   timeline.classList.remove('process-collapsed');
-  if(running&&wasNearBottom)requestAnimationFrame(()=>{timeline.scrollTop=timeline.scrollHeight});
+  requestAnimationFrame(()=>{timeline.scrollTop=wasNearBottom?timeline.scrollHeight:previousScroll});
 };
 const _orbitUnifiedNewCodeSession=newCodeSession;
 newCodeSession=function(){_orbitUnifiedNewCodeSession();$('codeTimeline').classList.remove('process-collapsed')};
 $('newCodeSession').onclick=newCodeSession;
 codeRail.hidden=true;updateOrbitNavigation();
 const primaryChatButton=orbitSidebar.querySelector('.nav button[data-page="chat"]'),primaryPluginButton=orbitSidebar.querySelector('.nav button[data-page="plugins"]');
-if(primaryChatButton)primaryChatButton.addEventListener('click',event=>{if(!orbitSidebar.classList.contains('code-mode'))return;event.preventDefault();event.stopImmediatePropagation();showPage('code');newCodeSession()},{capture:true});
+if(primaryChatButton)primaryChatButton.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();if(orbitSidebar.classList.contains('code-mode')){showPage('code');newCodeSession();return}showPage('chat');newConversation()},{capture:true});
 if(primaryPluginButton)primaryPluginButton.addEventListener('click',event=>{if(!orbitSidebar.classList.contains('code-mode'))return;event.preventDefault();event.stopImmediatePropagation();$('openCodePlugins').click()},{capture:true});
 '''+"</script></body></html>",
     1,
@@ -360,7 +509,7 @@ if(codeAdvancedPanel){
   $('composerAdvancedToggle').onclick=event=>{event.stopPropagation();const hidden=list.hidden;list.hidden=!hidden;$('composerAdvancedToggle').lastElementChild.textContent=hidden?'⌄':'›'};
 }
 const codeSourceField=$('codeSource')?.closest('.field');if(codeSourceField)codeSourceField.hidden=true;
-function updateComposerModelLabel(){const model=$('codeModel');if(!model)return;const modelText=(model.selectedOptions[0]?.textContent||'Orbit').replace(/ · 自动选择/,'');$('codeAdvanced').textContent=modelText}
+function updateComposerModelLabel(){const model=$('codeModel');if(!model)return;$('codeAdvanced').textContent=orbitShortModelName()}
 const _orbitComposerSyncSliders=syncCodeSliders;syncCodeSliders=function(){_orbitComposerSyncSliders();updateComposerModelLabel()};
 const _orbitComposerRefreshSettings=refreshCodeSettings;refreshCodeSettings=async function(){await _orbitComposerRefreshSettings();updateComposerModelLabel()};
 $('codeModel').onchange=()=>{$('codeSource').value=$('codeModel').value;persistCodeControls();updateComposerModelLabel()};
@@ -416,7 +565,14 @@ PAGE = PAGE.replace(
     r'''
 let orbitWorkspaceMode='orbit';
 if(codeRail){codeRail.hidden=true;document.body.appendChild(codeRail)}
-function orbitModeForPage(name){return name==='code'||name==='codeApi'?'code':name==='train'||name==='runs'?'training':'orbit'}
+// Pages such as Plugins, Models and Settings are shared destinations. Opening
+// one must not silently change the selected product or its history source.
+function orbitModeForPage(name,current=orbitWorkspaceMode){
+  if(name==='code')return 'code';
+  if(name==='train'||name==='runs')return 'training';
+  if(name==='chat')return 'orbit';
+  return current||'orbit';
+}
 function orbitWorkspaceLabel(mode){return mode==='code'?'Orbit Code':mode==='training'?(currentLang==='zh'?'训练':'Training'):'Orbit'}
 async function refreshWorkspaceHistory(){
   const target=$('sidebarConversationList'),title=orbitSidebar.querySelector('.sidebar-history-title');if(!target||!title)return;
@@ -436,7 +592,7 @@ function setOrbitWorkspaceMode(mode){
   orbitSidebar.classList.toggle('code-mode',mode==='code');
   refreshWorkspaceHistory();
 }
-const _orbitContextualShowPage=showPage;showPage=function(name){_orbitContextualShowPage(name);setOrbitWorkspaceMode(orbitModeForPage(name))};
+const _orbitContextualShowPage=showPage;showPage=function(name){_orbitContextualShowPage(name);setOrbitWorkspaceMode(orbitModeForPage(name,orbitWorkspaceMode))};
 document.querySelectorAll('[data-page]').forEach(button=>button.onclick=()=>showPage(button.dataset.page));
 document.querySelectorAll('[data-product-page]').forEach(button=>button.onclick=()=>showPage(button.dataset.productPage));
 if(primaryChatButton)primaryChatButton.addEventListener('click',event=>{if(orbitWorkspaceMode!=='training')return;event.preventDefault();event.stopImmediatePropagation();showPage('train');if(typeof resetTrainingForm==='function')resetTrainingForm()},{capture:true});
@@ -1173,9 +1329,9 @@ PAGE = PAGE.replace(
 
 _ORBIT_CODE_HTML = r'''
 <section id="code" class="page"><div class="code-layout">
-  <aside class="panel code-rail"><div class="panel-head"><div><h2>Orbit Code</h2><p>Agent 会先计划，再执行与验证。</p></div><button class="button" id="newCodeSession">＋ 新对话</button></div><div class="code-rail-scroll"><div class="field"><label>模型来源</label><select id="codeSource"></select></div><div class="field" style="margin-top:12px"><label>思考深度 <span id="reasoningValue">中</span></label><div class="segmented-range"><input id="codeReasoning" type="range" min="0" max="5" value="2" step="1"><div class="range-labels"><span>无</span><span>低</span><span>中</span><span>高</span><span>极高</span><span>最大</span></div></div></div><div class="field" style="margin-top:12px"><label>能力 <span id="capabilityValue">3/5</span></label><div class="segmented-range"><input id="codeCapability" type="range" min="1" max="5" value="3" step="1"><div class="range-labels"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div></div></div><div class="context-options"><label><span><b>本地上下文</b><small>读取当前工作区结构与说明</small></span><input id="codeLocalContext" type="checkbox" checked></label><label><span><b>长期记忆</b><small>使用以前完成任务的摘要</small></span><input id="codeLongMemory" type="checkbox" checked></label></div><div class="divider" style="margin:14px 0"></div><div class="code-history-title">对话历史</div><div id="codeSessions"></div></div></aside>
-  <div class="panel code-main"><div class="panel-head"><div><h2 id="codeSessionTitle">新任务</h2><p id="codeSessionMeta">选择工作区并描述结果。</p></div><div class="actions"><button class="button" id="openCodeApi">API 与模型</button><button class="button" id="reviewCodeChanges">审核修改</button></div></div><div class="code-timeline" id="codeTimeline"><div class="code-empty"><div><b>想让 Orbit Code 做什么？</b><span>它会先告诉你怎么做，再显示每一步、耗时和文件变化。</span></div></div></div>
-  <div class="code-composer-zone"><div class="code-progress-strip" id="codeProgress" hidden><div class="liquid-pill step-pill"><span class="step-ring" id="stepRing"></span><b id="stepCount">0/0</b></div><button class="liquid-pill change-pill del" id="codeDeletions">−0 · 0 文件</button><button class="liquid-pill change-pill add" id="codeAdditions">+0 · 0 文件</button></div><div class="liquid-pill code-composer"><div class="attachment-tray" id="codeAttachments"></div><textarea class="code-input" id="codePrompt" placeholder="告诉 Orbit Code 你想完成什么…" autocomplete="off" autocorrect="off" spellcheck="false"></textarea><div class="composer-bottom"><button class="round-action" id="codeAttach" title="图片或文件">＋</button><input id="codeFiles" type="file" accept="image/*,audio/*" multiple hidden><select class="permission" id="codePermission"><option value="ask">请求批准</option><option value="workspace">替我批准 · 工作区</option><option value="full">完全访问</option></select><select class="guide-mode" id="codeGuideMode" hidden><option value="steer">立即引导</option><option value="queue">排队</option></select><button class="round-action" id="codeAdvanced" title="高级">⌘</button><button class="round-action" id="codeMic" title="语音">⌾</button><button class="send-or-guide" id="codeSend">↑</button></div><div class="advanced-pop" id="codeAdvancedPanel" hidden><div class="form-grid"><div class="field"><label>具体模型</label><select id="codeModel"></select></div><div class="field"><label>速度</label><select id="codeSpeed"><option value="fast">快速</option><option value="balanced">平衡</option><option value="quality">质量优先</option></select></div></div><div class="field workspace-field" style="margin-top:10px"><label>工作区</label><input id="codeWorkspace" placeholder="自动生成 Orbit 工作区；输入路径可改为固定工作区"><span class="help">整个 Orbit Code 长期复用同一个自动工作区；“完全访问”仍可操作工作区之外。</span></div></div></div></div></div>
+  <aside class="panel code-rail"><div class="panel-head"><div><h2>Orbit Code</h2><p>Agent 会先计划，再执行与验证。</p></div><button class="button" id="newCodeSession">＋ 新对话</button></div><div class="code-rail-scroll"><div class="field"><label>模型来源</label><select id="codeSource"></select></div><div class="field" style="margin-top:12px"><label>思考深度 <span id="reasoningValue">中</span></label><div class="segmented-range"><input id="codeReasoning" type="range" min="0" max="5" value="2" step="0.01"><div class="range-labels"><span>无</span><span>低</span><span>中</span><span>高</span><span>极高</span><span>最大</span></div></div></div><div class="field" style="margin-top:12px"><label>能力 <span id="capabilityValue">3/5</span></label><div class="segmented-range"><input id="codeCapability" type="range" min="1" max="5" value="3" step="1"><div class="range-labels"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div></div></div><div class="context-options"><label><span><b>本地上下文</b><small>读取当前工作区结构与说明</small></span><input id="codeLocalContext" type="checkbox" checked></label><label><span><b>长期记忆</b><small>使用以前完成任务的摘要</small></span><input id="codeLongMemory" type="checkbox" checked></label></div><div class="divider" style="margin:14px 0"></div><div class="code-history-title">对话历史</div><div id="codeSessions"></div></div></aside>
+  <div class="panel code-main"><div class="panel-head"><div><h2 id="codeSessionTitle">新任务</h2><p id="codeSessionMeta">选择工作区并描述结果。</p></div><div class="actions"><button class="button" id="openCodeApi">API 与模型</button><button class="button" id="reviewCodeChanges">审核修改</button></div></div><div class="code-timeline" id="codeTimeline"><div class="code-empty"><div><b>今天我们构建什么？</b><span>Orbit Code 会先说明计划，再持续展示执行、发现和验证结果。</span></div></div></div>
+  <div class="code-composer-zone"><div class="code-progress-strip liquid-pill" id="codeProgress" hidden><div class="step-pill"><span class="step-ring" id="stepRing"></span><b id="stepCount">0/0</b><span class="step-caption">步</span></div><span class="progress-divider"></span><button class="change-pill del" id="codeDeletions">−0 · 0 文件</button><span class="progress-divider"></span><button class="change-pill add" id="codeAdditions">+0 · 0 文件</button></div><div class="liquid-pill code-composer"><div class="attachment-tray" id="codeAttachments"></div><textarea class="code-input" id="codePrompt" placeholder="今天我们构建什么？" autocomplete="off" autocorrect="off" spellcheck="false"></textarea><div class="composer-bottom"><button class="round-action" id="codeAttach" title="图片或文件">＋</button><input id="codeFiles" type="file" accept="image/*,audio/*" multiple hidden><select class="permission" id="codePermission"><option value="ask">请求批准</option><option value="workspace">替我批准 · 工作区</option><option value="full">完全访问</option></select><select class="guide-mode" id="codeGuideMode" hidden><option value="steer">立即引导</option><option value="queue">排队</option></select><button class="round-action" id="codeMic" title="语音">⌾</button><button class="round-action" id="codeAdvanced" title="模型与智能">Orbit</button><button class="send-or-guide" id="codeSend">↑</button></div><div class="advanced-pop" id="codeAdvancedPanel" hidden><div class="form-grid"><div class="field"><label>具体模型</label><select id="codeModel"></select></div><div class="field"><label>速度</label><select id="codeSpeed"><option value="fast">快速</option><option value="balanced">平衡</option><option value="quality">质量优先</option></select></div></div><div class="field workspace-field" style="margin-top:10px"><label>工作区</label><input id="codeWorkspace" placeholder="自动生成 Orbit 工作区；输入路径可改为固定工作区"><span class="help">整个 Orbit Code 长期复用同一个自动工作区；“完全访问”仍可操作工作区之外。</span></div></div></div></div></div>
 </div></section>
 <section id="codeApi" class="page"><div class="model-library-shell"><header class="model-settings-head"><div><h2>模型</h2><p>API 与本地模型集中在这里。拖到第一位即设为默认，新任务会自动使用。</p></div><button class="button" id="backToCode">返回 Orbit Code</button></header><section class="model-library-card"><div class="model-library-heading"><div><h3>已有模型</h3><p>本地训练完成后会自动加入；拖动右侧把手即可排序。</p></div></div><div id="codeModelLibrary" class="model-sort-list"></div><div class="model-add-divider"></div><button class="model-add-toggle" id="openApiEditor" type="button"><span>＋</span><span><b>添加新模型</b><small>连接 API 服务或 OpenAI 兼容模型</small></span><i>⌄</i></button><div class="api-editor-inline" id="apiEditorSheet" hidden><div class="model-library-heading"><div><h3 id="apiEditorTitle">添加 API 模型</h3><p>选择预设服务，或填写 OpenAI 兼容 API。</p></div><button class="button" id="closeApiEditor" type="button">收起</button></div><div class="form-stack"><input id="codeProfileId" type="hidden"><div class="field"><label>配置名称</label><input id="codeProfileName" placeholder="例如：Kimi Code"></div><div class="field"><label>Base URL</label><input id="codeApiUrl" value="https://api.openai.com/v1"></div><div class="field"><label>模型</label><div class="api-model-choice"><select id="codeApiModel"></select><button class="button ghost" id="toggleCodeCustomModel" type="button">手写</button></div><input id="codeApiCustomModel" placeholder="输入自定义模型 ID" hidden style="margin-top:8px"><span class="help">其他服务使用“自定义 OpenAI 兼容 API”。</span></div><div class="field"><label>API Key</label><input id="codeApiKey" type="password" autocomplete="off" data-paste-enabled="true" spellcheck="false" placeholder="sk-…"><span class="help" id="codeApiKeyHint">编辑已有配置时留空会保留旧 Key。</span></div><button class="button primary" id="saveCodeProfile">保存并加入已有模型</button></div></div></section></div></section>
 <aside class="review-drawer" id="reviewDrawer"><div class="review-head"><h2>审核 Orbit Code 修改</h2><button class="button" id="closeReview" style="margin-left:auto">完成</button></div><div class="review-filters"><button class="button" data-review-filter="all">全部</button><button class="button" data-review-filter="added">新增</button><button class="button" data-review-filter="modified">修改</button><button class="button" data-review-filter="deleted">删除</button></div><div class="review-files" id="reviewFiles"></div></aside>
@@ -1190,9 +1346,9 @@ PAGE = PAGE.replace(
 _ORBIT_CODE_JS = r'''
 let codeSettings=null,currentCodeSession=null,codePoller=null,codeAttachmentData=[],codeRecorder=null,codeRecordingChunks=[],codeReviewFilter='all',codeProcessExpanded=true;
 const reasoningValues=['low','medium','high','xhigh','max','ultra'];
-function codeIsRunning(s){return s&&['planning','running','waiting_approval','stopping'].includes(s.status)}function codeCanGuide(s){return s&&['planning','running','waiting_approval'].includes(s.status)}
+function codeIsRunning(s){return s&&['planning','running','paused','waiting_approval','stopping'].includes(s.status)}function codeCanGuide(s){return s&&['planning','running','paused','waiting_approval'].includes(s.status)}
 function codeReasoningLabel(){return currentLang==='zh'?['低','中','高','极高','最高','Ultra']:['Low','Medium','High','Pro','Max','Ultra']}
-function syncCodeSliders(){const reasoning=$('codeReasoning'),capability=$('codeCapability');$('reasoningValue').textContent=codeReasoningLabel()[+reasoning.value];$('capabilityValue').textContent=capability.value+'/5';[reasoning,capability].forEach(input=>input.style.setProperty('--range-fill',((+input.value-(+input.min||0))/((+input.max||1)-(+input.min||0))*100)+'%'))}
+function syncCodeSliders(){const reasoning=$('codeReasoning'),capability=$('codeCapability'),reasoningIndex=Math.max(0,Math.min(reasoningValues.length-1,Math.round(Number(reasoning.value)||0)));$('reasoningValue').textContent=codeReasoningLabel()[reasoningIndex];$('capabilityValue').textContent=capability.value+'/5';[reasoning,capability].forEach(input=>input.style.setProperty('--range-fill',((+input.value-(+input.min||0))/((+input.max||1)-(+input.min||0))*100)+'%'))}
 async function refreshCodeSettings(){codeSettings=await request('/api/code/settings');$('codePermission').value=codeSettings.permission||'ask';$('codeReasoning').value=Math.max(0,reasoningValues.indexOf(codeSettings.reasoning||'medium'));$('codeCapability').value=codeSettings.capability||'3';$('codeSpeed').value=codeSettings.speed||'balanced';$('codeWorkspace').value=codeSettings.workspace_auto===false?(codeSettings.workspace||''):'';$('codeLocalContext').checked=codeSettings.local_context!==false;$('codeLongMemory').checked=codeSettings.long_term_memory!==false;const source=$('codeSource'),model=$('codeModel'),selected=source.value||((codeSettings.provider==='api'&&codeSettings.active_profile_id)?'api:'+codeSettings.active_profile_id:'local:'+(codeSettings.model||''));source.innerHTML='<optgroup label="本地 Orbit"><option value="local:">Orbit · 自动选择</option>'+codeSettings.local_models.map(x=>`<option value="local:${esc(x.id)}">${esc(x.name||x.id)}</option>`).join('')+'</optgroup><optgroup label="API">'+codeSettings.profiles.map(x=>`<option value="api:${esc(x.id)}">${esc(x.name||x.model)} · ${esc(x.model)}</option>`).join('')+'</optgroup>';if([...source.options].some(x=>x.value===selected))source.value=selected;model.innerHTML=source.innerHTML;model.value=source.value;renderCodeProfiles();syncCodeSliders()}
 function codeLibraryRows(){const rows=[...codeSettings.profiles.map(x=>({key:'api:'+x.id,type:'api',id:x.id,name:x.name||x.model,detail:x.model+' · '+x.base_url,keyHint:x.key_hint||'未保存 Key'})),...codeSettings.local_models.map(x=>({key:'local:'+x.id,type:'local',id:x.id,name:x.name||x.id,detail:x.id+' · '+(Number(x.size_bytes||0)/1048576<1?'&lt;1':(Number(x.size_bytes||0)/1048576).toFixed(1))+' MB'}))],active=codeSettings.provider==='api'?'api:'+codeSettings.active_profile_id:'local:'+(codeSettings.model||''),stored=codeSettings.model_order||[],order=[active,...stored.filter(key=>key!==active)].filter(Boolean),rank=new Map(order.map((key,index)=>[key,index]));return rows.sort((a,b)=>(rank.get(a.key)??9999)-(rank.get(b.key)??9999)||a.name.localeCompare(b.name))}
 function renderCodeProfiles(){if(!codeSettings)return;const rows=codeLibraryRows(),active=codeSettings.provider==='api'?'api:'+codeSettings.active_profile_id:'local:'+(codeSettings.model||'');$('codeModelLibrary').innerHTML=rows.length?rows.map((x,index)=>`<article class="model-library-row ${x.key===active?'is-default':''}" draggable="true" data-model-key="${esc(x.key)}"><button class="model-row-actions" onclick="event.stopPropagation();toggleModelRowActions('${x.key}')" title="模型操作">•••</button><span class="model-source-badge ${x.type}">${x.type==='api'?'API':'本地'}</span><span class="model-library-copy"><b>${esc(x.name)}</b><small>${esc(x.detail)}${x.keyHint?' · '+esc(x.keyHint):''}</small></span>${x.key===active?'<span class="default-model-label">默认</span>':''}<span class="model-drag-handle" title="拖动排序">⋮⋮</span><div class="model-row-menu" onclick="event.stopPropagation()" data-model-menu="${esc(x.key)}" hidden>${x.key===active?'':`<button onclick="setCodeDefaultModel('${x.key}')">设为默认</button>`}${x.type==='api'?`<button onclick="editCodeProfile('${x.id}')">编辑 API</button><button class="danger" onclick="deleteCodeLibraryModel('${x.key}')">删除</button>`:`<button onclick="editCodeLocalModel('${x.id}')">编辑本地模型</button><button class="danger" onclick="deleteCodeLibraryModel('${x.key}')">删除本地模型</button>`}</div></article>`).join(''):'<div class="config-empty"><b>还没有模型</b><span>训练本地模型，或在下方添加 API 模型。</span></div>';wireCodeModelSorting()}
@@ -1206,18 +1362,18 @@ function wireCodeModelSorting(){let dragged='';document.querySelectorAll('#codeM
 function editCodeProfile(id){const x=codeSettings.profiles.find(p=>p.id===id);if(!x)return;document.querySelectorAll('.model-row-menu').forEach(x=>x.hidden=true);editingCodeLocalModel='';setCodeEditorKind('api');$('apiEditorSheet').hidden=false;$('codeProfileId').value=x.id;$('codeProfileName').value=x.name;$('codeApiUrl').value=x.base_url;$('codeApiFormat').value=x.api_format||'openai';$('codeApiPreset').value=codeProviderFromProfile(x);syncCodeApiModels(x.model);$('codeApiKey').value='';$('apiEditorTitle').textContent='编辑 API 模型';$('apiEditorTitle').nextElementSibling.textContent='修改名称、服务地址、模型 ID 或 API Key。';$('saveCodeProfile').textContent='保存 API 模型';$('codeProfileName').focus()}
 async function deleteCodeProfile(id){if(!await actionConfirm(currentLang==='zh'?'删除这个 API 配置？':'Delete this API profile?'))return;await request('/api/code/settings/delete',{method:'POST',body:JSON.stringify({profile_id:id})});await refreshCodeSettings()}
 async function saveCodeProfile(){try{if(editingCodeLocalModel){const name=$('codeProfileName').value.trim();if(!name)throw new Error('请填写模型显示名称');await request('/api/models/rename',{method:'POST',body:JSON.stringify({model:editingCodeLocalModel,name})});editingCodeLocalModel='';$('apiEditorSheet').hidden=true;await refreshCodeSettings();toast('本地模型已保存。');return}await request('/api/code/settings',{method:'POST',body:JSON.stringify({save_profile:true,profile_id:$('codeProfileId').value,profile_name:$('codeProfileName').value,base_url:$('codeApiUrl').value,model:selectedCodeApiModel(),api_key:$('codeApiKey').value,api_format:$('codeApiFormat').value||'openai',workspace:$('codeWorkspace').value||codeSettings.workspace||''})});$('codeProfileId').value='';$('codeProfileName').value='';syncCodeApiModels();$('codeApiKey').value='';$('apiEditorSheet').hidden=true;await refreshCodeSettings();toast(currentLang==='zh'?'API 配置已保存。':'API profile saved.')}catch(e){toast(e.message)}}
-function codeSourcePayload(){const [provider,value]=String($('codeSource').value||'local:').split(':'),workspace=$('codeWorkspace').value.trim();return{provider,profile_id:provider==='api'?value:'',model:provider==='local'?value:'',reasoning:reasoningValues[+$('codeReasoning').value],capability:$('codeCapability').value,speed:$('codeSpeed').value,permission:$('codePermission').value,workspace,workspace_auto:!workspace,local_context:$('codeLocalContext').checked,long_term_memory:$('codeLongMemory').checked}}
+function codeSourcePayload(){const [provider,value]=String($('codeSource').value||'local:').split(':'),workspace=$('codeWorkspace').value.trim(),reasoningIndex=Math.max(0,Math.min(reasoningValues.length-1,Math.round(Number($('codeReasoning').value)||0)));return{provider,profile_id:provider==='api'?value:'',model:provider==='local'?value:'',reasoning:reasoningValues[reasoningIndex],capability:$('codeCapability').value,speed:$('codeSpeed').value,permission:$('codePermission').value,workspace,workspace_auto:!workspace,local_context:$('codeLocalContext').checked,long_term_memory:$('codeLongMemory').checked}}
 async function persistCodeControls(){try{const p=codeSourcePayload();await request('/api/code/settings',{method:'POST',body:JSON.stringify({...p,active_profile_id:p.profile_id})});codeSettings=await request('/api/code/settings')}catch(e){toast(e.message)}}
 async function refreshCodeSessions(){try{const rows=await request('/api/code/sessions');$('codeSessions').innerHTML=rows.map(r=>`<button class="code-session ${currentCodeSession===r.id?'active':''}" onclick="openCodeSession('${r.id}')"><span class="session-title"><b>${esc(r.title||'Orbit Code')}</b>${codeIsRunning(r)?'<i class="session-spinner" aria-label="正在运行"></i>':''}</span><span>${esc(r.status)} · ${formatCodeTime(r.duration_ms||0)}</span></button>`).join('')||'<div class="help">还没有 Orbit Code 对话。</div>'}catch(e){toast(e.message)}}
 function formatCodeTime(ms){const sec=Math.max(0,Math.round(ms/1000));return sec<60?sec+'s':Math.floor(sec/60)+'m '+sec%60+'s'}
 function eventTime(value){try{return new Date(value).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch{return value||''}}
-function guidanceMenu(id){const row=currentCodeSessionData?.directives?.find(x=>x.id===id),used=row?.consumed;if(!row)return;actionPrompt(currentLang==='zh'?'选择：编辑 / 排队 / 撤销':'Choose: edit / queue / delete','').then(async action=>{action=String(action||'').trim();if(!action)return;let body={directive_id:id};if(['编辑','edit'].includes(action)){if(used){toast('已经执行的引导不能编辑。');return}const text=await actionPrompt('编辑引导',row.prompt);if(text===null)return;body.action='edit';body.prompt=text}else if(['排队','queue'].includes(action)){body.action='queue'}else if(['撤销','删除','delete'].includes(action)){if(!await actionConfirm(currentLang==='zh'?'确认撤销这条排队消息？':'Cancel this queued message?'))return;body.action='delete'}else{toast('请输入“编辑”“排队”或“撤销”。');return}try{currentCodeSessionData=await request(`/api/code/sessions/${currentCodeSession}/guide-update`,{method:'POST',body:JSON.stringify(body)});renderCodeSession(currentCodeSessionData)}catch(e){toast(e.message)}})}
+function guidanceMenu(id){const row=currentCodeSessionData?.directives?.find(x=>x.id===id),used=row?.consumed;if(!row)return;const isSide=row.mode==='steer',choices=isSide?(currentLang==='zh'?'选择：编辑 / 改为排队 / 在侧边打开为新对话':'Choose: edit / move to queue / open as new conversation'):(currentLang==='zh'?'选择：编辑 / 调整方向（作为引导） / 在侧边打开为新对话 / 取消排队':'Choose: edit / steer as guidance / open as new conversation / cancel queue');actionPrompt(choices,'').then(async action=>{action=String(action||'').trim();if(!action)return;const sideOpen=['侧边打开','在侧边打开','在侧边打开为新对话','新对话','open as new conversation','open in side'];if(sideOpen.includes(action)){openQueuedAsNewConversation(id);return}let body={directive_id:id};if(['编辑','edit'].includes(action)){if(used){toast(currentLang==='zh'?'已经执行的引导不能编辑。':'Completed guidance cannot be edited.');return}const text=await actionPrompt(currentLang==='zh'?'编辑消息':'Edit message',row.prompt);if(text===null)return;body.action='edit';body.prompt=text}else if(['排队','改为排队','queue','move to queue'].includes(action)){body.action='queue'}else if(['调整方向','作为引导','引导','steer','steer as guidance','open as side guidance'].includes(action)){body.action='steer'}else if(['撤销','取消排队','删除','delete','cancel queue'].includes(action)){if(isSide){toast(currentLang==='zh'?'侧边引导不可撤销，可改回排队。':'Side guidance cannot be cancelled; move it back to the queue.');return}if(!await actionConfirm(currentLang==='zh'?'确认取消排队？':'Cancel this queued message?'))return;body.action='delete'}else{toast(currentLang==='zh'?(isSide?'请输入“编辑”“改为排队”或“在侧边打开为新对话”。':'请输入“编辑”“调整方向”“在侧边打开为新对话”或“取消排队”。'):(isSide?'Enter “edit”, “move to queue”, or “open as new conversation”.':'Enter “edit”, “steer”, “open as new conversation”, or “cancel queue”.'));return}try{currentCodeSessionData=await request(`/api/code/sessions/${currentCodeSession}/guide-update`,{method:'POST',body:JSON.stringify(body)});renderCodeSession(currentCodeSessionData)}catch(e){toast(e.message)}})}
 let currentCodeSessionData=null;
 function renderCodeEvent(e,row){if(e.kind==='guidance'){const d=row.directives?.find(x=>x.id===e.directive_id);if(d?.deleted)return'';return`<div class="agent-event"><div class="guidance-card"><div class="guidance-copy"><small>↪ ${d?.mode==='queue'?'排队的引导':'引导对话'} · ${eventTime(e.time)}${d?.consumed?' · 已处理':' · 等待处理'}</small><div>${esc(d?.prompt||e.detail||'')}</div></div><button class="more-button" onclick="guidanceMenu('${e.directive_id}')">…</button></div></div>`}if(e.kind==='approval'){return`<div class="agent-event"><div class="approval-box"><b>请求批准</b><div class="small" style="margin:5px 0 10px">${esc(e.detail)}</div><div class="actions"><button class="button primary" onclick="codeApprove(true)">批准</button><button class="button" onclick="codeApprove(false)">拒绝</button></div></div></div>`}const detail=esc(e.detail||''),isTool=e.kind==='tool';return`<div class="agent-event ${e.kind}"><details class="event-card" ${e.status==='running'||e.phase==='plan'||e.phase==='summary'?'open':''}><summary><span><span class="event-title">${esc(e.title||e.kind)}</span><span class="event-meta"> · ${eventTime(e.time)}</span></span><span class="event-meta">${e.duration_ms!=null?formatCodeTime(e.duration_ms):e.status||''}</span></summary><div class="event-detail ${isTool?'tool-output':''}">${detail}</div></details></div>`}
 function updateCodeSendState(){const active=codeIsRunning(currentCodeSessionData),hasText=Boolean($('codePrompt').value.trim());$('codeSend').textContent=active&&!hasText?'■':'↑';$('codeSend').title=active&&!hasText?'停止当前回答':'发送';$('codeSend').classList.toggle('busy',active&&!hasText)}function renderCodeSession(row){currentCodeSessionData=row;$('codeSessionTitle').textContent=row.title||'Orbit Code';$('codeSessionMeta').textContent=`${row.status} · ${formatCodeTime(row.duration_ms||0)} · ${row.settings?.model||'Orbit'}`;$('codeTimeline').innerHTML=row.events.length?row.events.map(e=>renderCodeEvent(e,row)).join(''):'<div class="code-empty"><div><b>正在开始</b><span>Orbit Code 正在理解任务。</span></div></div>';const p=row.progress||{},c=row.changes||{},total=Math.max(p.total||0,p.completed||0),deg=total?Math.min(360,(p.completed||0)/total*360):0;$('codeProgress').hidden=false;$('stepRing').style.setProperty('--progress',deg+'deg');$('stepCount').textContent=`${p.completed||0}/${total}`;$('codeDeletions').textContent=`−${c.deletions||0} · ${c.files_changed||0} 文件`;$('codeAdditions').textContent=`+${c.additions||0} · ${c.files_changed||0} 文件`;$('codeGuideMode').hidden=!codeCanGuide(row);$('codePrompt').placeholder=codeCanGuide(row)?'引导正在执行的 Orbit Code…':'告诉 Orbit Code 你想完成什么…';updateCodeSendState();renderReviewFiles();requestAnimationFrame(()=>$('codeTimeline').scrollTop=$('codeTimeline').scrollHeight)}
 async function openCodeSession(id){currentCodeSession=id;try{const row=await request('/api/code/sessions/'+id);codeProcessExpanded=codeIsRunning(row);renderCodeSession(row);startCodePoll();await refreshCodeSessions()}catch(e){toast(e.message)}}
 function startCodePoll(){if(codePoller)clearInterval(codePoller);if(!currentCodeSession)return;codePoller=setInterval(async()=>{try{const row=await request('/api/code/sessions/'+currentCodeSession);renderCodeSession(row);if(!codeIsRunning(row)){clearInterval(codePoller);codePoller=null;await refreshCodeSessions()}}catch{}},650)}
-async function codeApprove(approved){if(!currentCodeSession)return;try{const row=await request(`/api/code/sessions/${currentCodeSession}/approval`,{method:'POST',body:JSON.stringify({approved})});renderCodeSession(row)}catch(e){toast(e.message)}}
+async function codeApprove(approved){if(!currentCodeSession)return;document.querySelectorAll('.approval-box button').forEach(button=>button.disabled=true);try{const row=await request(`/api/code/sessions/${currentCodeSession}/approval`,{method:'POST',body:JSON.stringify({approved})});currentCodeSessionData=row;renderCodeSession(row);startCodePoll();toast(approved?'已批准，Orbit Code 正在继续执行。':'已拒绝该操作。')}catch(e){toast(e.message);document.querySelectorAll('.approval-box button').forEach(button=>button.disabled=false)}}
 async function sendCodePrompt(){const prompt=$('codePrompt').value.trim();if(!prompt&&codeIsRunning(currentCodeSessionData)){try{const row=await request(`/api/code/sessions/${currentCodeSession}/stop`,{method:'POST',body:'{}'});renderCodeSession(row)}catch(e){toast(e.message)}return}if(!prompt)return;$('codePrompt').value='';if(currentCodeSessionData&&codeCanGuide(currentCodeSessionData)){try{const row=await request(`/api/code/sessions/${currentCodeSession}/guide`,{method:'POST',body:JSON.stringify({prompt,mode:$('codeGuideMode').value})});renderCodeSession(row)}catch(e){toast(e.message)}return}try{await persistCodeControls();const row=await request('/api/code/sessions',{method:'POST',body:JSON.stringify({...codeSourcePayload(),prompt,attachments:codeAttachmentData})});codeAttachmentData=[];renderCodeAttachments();currentCodeSession=row.id;renderCodeSession(row);startCodePoll();await refreshCodeSessions()}catch(e){toast(e.message)}}
 function renderCodeAttachments(){$('codeAttachments').innerHTML=codeAttachmentData.map((x,i)=>`<span class="attachment-chip">${esc(x.name)} <button onclick="codeAttachmentData.splice(${i},1);renderCodeAttachments()">×</button></span>`).join('')}
 function fileToAttachment(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({name:file.name,type:file.type||'application/octet-stream',data:String(reader.result).split(',')[1]||''});reader.onerror=reject;reader.readAsDataURL(file)})}
@@ -1239,12 +1395,12 @@ PAGE = PAGE.replace("mode:$('codeGuideMode').value", "mode:'queue'", 1)
 # without reintroducing a logo beside the top-left Orbit wordmark.
 PAGE = PAGE.replace(
     ".step-ring:after{content:'';position:absolute;inset:5px;border-radius:50%;background:rgba(250,251,253,.96)}",
-    ".step-ring:before{content:'';position:absolute;z-index:2;top:-2px;left:7px;width:8px;height:7px;background:rgba(250,251,253,.98)}.step-ring:after{content:'';position:absolute;z-index:1;inset:5px;border-radius:50%;background:rgba(250,251,253,.96)}",
+    ".step-ring:before{display:none}.step-ring:after{content:'';position:absolute;z-index:1;inset:5px;border-radius:50%;background:rgba(250,251,253,.96)}",
     1,
 )
 PAGE = PAGE.replace(
     ".agent-event.assistant:before{background:var(--blue);box-shadow:0 0 0 5px rgba(33,104,243,.12)}",
-    ".agent-event.assistant:before{width:10px;height:10px;left:5px;top:5px;background:transparent;border:2px solid var(--blue);border-top-color:transparent;box-shadow:0 0 0 5px rgba(33,104,243,.1)}",
+    ".agent-event.assistant:before{width:10px;height:10px;left:5px;top:5px;background:transparent;border:2px solid var(--blue);box-shadow:0 0 0 5px rgba(33,104,243,.1)}",
     1,
 )
 
@@ -1267,13 +1423,16 @@ PAGE = PAGE.replace(
 PAGE = PAGE.replace(
     "</script></body></html>",
     r'''
-function renderQueuedGuides(){const box=$('queuedGuides');if(!box)return;const rows=(currentCodeSessionData?.directives||[]).filter(x=>!x.deleted&&!x.consumed);box.innerHTML=rows.map(x=>`<div class="queued-guide"><button class="move-guide" onclick="moveQueuedGuide('${x.id}')" title="改为立即引导">↪</button><span>${esc(x.prompt)}</span><small>${x.mode==='steer'?'引导':'排队'}</small>${x.mode==='steer'?'':`<button class="delete-guide" onclick="deleteQueuedGuide('${x.id}')" title="撤销">×</button>`}</div>`).join('')}
+function renderQueuedGuides(){const box=$('queuedGuides');if(!box)return;const rows=(currentCodeSessionData?.directives||[]).filter(x=>!x.deleted&&!x.consumed);box.innerHTML=rows.map(x=>`<div class="queued-guide"><button class="move-guide" onclick="toggleGuidePosition('${x.id}','${x.mode}')" title="${x.mode==='steer'?'改为排队':'调整方向 · 作为引导'}">↪</button><span>${esc(x.prompt)}</span><small>${x.mode==='steer'?'引导':'排队'}</small><button onclick="editQueuedGuide('${x.id}')" title="编辑">✎</button><button onclick="openQueuedAsNewConversation('${x.id}')" title="在侧边打开为新对话">□</button>${x.mode==='steer'?'':`<button class="delete-guide" onclick="deleteQueuedGuide('${x.id}')" title="取消排队">×</button>`}</div>`).join('')}
 function codeDiffHtml(text){return String(text||'').split('\n').map(line=>`<span class="${line.startsWith('+')&&!line.startsWith('+++')?'diff-add':line.startsWith('-')&&!line.startsWith('---')?'diff-del':''}">${esc(line)}</span>`).join('\n')}function codeToolView(x){const files=x.file_changes||[],added=files.reduce((n,f)=>n+(f.additions||0),0),deleted=files.reduce((n,f)=>n+(f.deletions||0),0),paths=files.map(f=>f.path).join(', ')||x.path||x.title||'',running=x.status==='running',state=running?'正在':'已';if(x.tool==='web_search')return{icon:'◎',label:`${state}搜索网页 ${x.query?`“${x.query}”`:''}`,body:esc(`关键词：${x.query||''}\n\n${x.detail||''}`)};if(x.tool==='search')return{icon:'⌕',label:`${state}搜索文件/代码 ${x.query?`“${x.query}”`:''}${x.path?` · ${x.path}`:''}`,body:esc(`关键词：${x.query||''}\n范围：${x.path||'.'}\n\n${x.detail||''}`)};if(x.tool==='apply_patch')return{icon:'✎',label:`${state}编辑 ${paths}<span class="diff-add"> +${added}</span> <span class="diff-del">−${deleted}</span>`,body:codeDiffHtml(files.map(f=>f.diff).filter(Boolean).join('\n\n')||x.detail||'')};if(x.tool==='read_file'||x.tool==='list_files')return{icon:'⌕',label:`${state}查看 ${x.path||x.title||''}`,body:esc(x.detail||'')};return{icon:'›_',label:`${state}运行 ${x.command||x.title||''}`,body:esc(x.detail||'')}}function renderCompactCodeTimeline(row){const events=row.events||[],parts=[];for(let i=0;i<events.length;){const event=events[i];if(event.kind!=='tool'){parts.push(renderCodeEvent(event,row));i++;continue}const tools=[];while(i<events.length&&events[i].kind==='tool')tools.push(events[i++]);const editedFiles=new Set(tools.flatMap(x=>(x.file_changes||[]).map(f=>f.path))),runs=tools.filter(x=>x.tool==='shell').length,searches=tools.filter(x=>['search','web_search','read_file','list_files'].includes(x.tool)).length,summary=[];if(editedFiles.size)summary.push(`已编辑 ${editedFiles.size} 个文件`);if(runs)summary.push(`已运行 ${runs} 条命令`);if(searches)summary.push(`已完成 ${searches} 次搜索/查看`);parts.push(`<div class="tool-run-group"><div class="tool-run-summary"><span>✎</span><span>${summary.join('和')||'执行记录'}</span><span>›</span></div>${tools.map(x=>{const v=codeToolView(x);return`<details class="tool-run-row ${x.status==='failed'?'failed':''}"><summary><span class="tool-run-icon">${v.icon}</span><span class="tool-run-label">${v.label}</span><span class="tool-run-arrow">›</span></summary><div class="tool-run-output"><button class="button ghost" style="float:right;padding:4px 7px" onclick="event.preventDefault();event.stopPropagation();copyText(this.nextElementSibling.innerText)">复制</button><pre style="margin:0;white-space:pre-wrap">${v.body}</pre></div></details>`}).join('')}</div>`)}return parts.join('')}
 async function moveQueuedGuide(id){try{currentCodeSessionData=await request(`/api/code/sessions/${currentCodeSession}/guide-update`,{method:'POST',body:JSON.stringify({directive_id:id,action:'steer'})});renderCodeSession(currentCodeSessionData)}catch(e){toast(e.message)}}
+async function toggleGuidePosition(id,mode){try{currentCodeSessionData=await request(`/api/code/sessions/${currentCodeSession}/guide-update`,{method:'POST',body:JSON.stringify({directive_id:id,action:mode==='steer'?'queue':'steer'})});renderCodeSession(currentCodeSessionData)}catch(e){toast(e.message)}}
+async function editQueuedGuide(id){const row=currentCodeSessionData?.directives?.find(x=>x.id===id);if(!row||row.consumed)return;const prompt=await actionPrompt(currentLang==='zh'?'编辑消息':'Edit message',row.prompt);if(prompt===null||!String(prompt).trim())return;try{currentCodeSessionData=await request(`/api/code/sessions/${currentCodeSession}/guide-update`,{method:'POST',body:JSON.stringify({directive_id:id,action:'edit',prompt:String(prompt).trim()})});renderCodeSession(currentCodeSessionData)}catch(e){toast(e.message)}}
+function openQueuedAsNewConversation(id){const row=currentCodeSessionData?.directives?.find(x=>x.id===id);if(!row)return;newCodeSession();$('codePrompt').value=row.prompt;$('codePrompt').focus();updateCodeSendState()}
 async function deleteQueuedGuide(id){if(!await actionConfirm(currentLang==='zh'?'确认撤销这条排队消息？':'Cancel this queued message?'))return;try{currentCodeSessionData=await request(`/api/code/sessions/${currentCodeSession}/guide-update`,{method:'POST',body:JSON.stringify({directive_id:id,action:'delete'})});renderCodeSession(currentCodeSessionData)}catch(e){toast(e.message)}}
-const _orbitCodeRenderEvent=renderCodeEvent;renderCodeEvent=function(e,row){if(e.kind==='guidance'){const d=row.directives?.find(x=>x.id===e.directive_id);if(d?.deleted)return'';return`<div class="agent-event"><div class="guidance-card"><div class="guidance-copy"><small>↪ ${d?.mode==='steer'?'引导对话':'排队'} · ${eventTime(e.time)}${d?.consumed?' · 已处理':' · 等待处理'}</small><div>${esc(d?.prompt||e.detail||'')}</div></div>${d?.mode==='steer'?'':`<button class="more-button" onclick="guidanceMenu('${e.directive_id}')">…</button>`}</div></div>`}return _orbitCodeRenderEvent(e,row)};
+const _orbitCodeRenderEvent=renderCodeEvent;renderCodeEvent=function(e,row){if(e.kind==='guidance'){const d=row.directives?.find(x=>x.id===e.directive_id);if(d?.deleted)return'';return`<div class="agent-event"><div class="guidance-card"><div class="guidance-copy"><small>↪ ${d?.mode==='steer'?'引导对话':'排队'} · ${eventTime(e.time)}${d?.consumed?' · 已处理':' · 等待处理'}</small><div>${esc(d?.prompt||e.detail||'')}</div></div>${d?.consumed?'':`<button class="more-button" onclick="guidanceMenu('${e.directive_id}')" title="${currentLang==='zh'?'编辑或改为排队':'Edit or move to queue'}">…</button>`}</div></div>`}return _orbitCodeRenderEvent(e,row)};
 const _orbitCodeRenderSession=renderCodeSession;renderCodeSession=function(row){_orbitCodeRenderSession(row);$('codeTimeline').innerHTML=renderCompactCodeTimeline(row)||'<div class="code-empty"><div><b>正在开始</b><span>Orbit Code 正在理解任务。</span></div></div>';renderQueuedGuides();if($('codeGuideMode'))$('codeGuideMode').hidden=true;$('codePrompt').placeholder=codeCanGuide(row)?'发送后默认排队；点消息左侧 ↪ 可改为立即引导…':'告诉 Orbit Code 你想完成什么…'};
-sendCodePrompt=async function(){const prompt=$('codePrompt').value.trim();if(!prompt&&codeIsRunning(currentCodeSessionData)){try{const row=await request(`/api/code/sessions/${currentCodeSession}/stop`,{method:'POST',body:'{}'});renderCodeSession(row)}catch(e){toast(e.message)}return}if(!prompt)return;$('codePrompt').value='';updateCodeSendState();if(currentCodeSessionData&&codeCanGuide(currentCodeSessionData)){try{const row=await request(`/api/code/sessions/${currentCodeSession}/guide`,{method:'POST',body:JSON.stringify({prompt,mode:'queue'})});renderCodeSession(row)}catch(e){toast(e.message)}return}try{await persistCodeControls();const row=await request('/api/code/sessions',{method:'POST',body:JSON.stringify({...codeSourcePayload(),prompt,attachments:codeAttachmentData})});codeAttachmentData=[];renderCodeAttachments();currentCodeSession=row.id;renderCodeSession(row);startCodePoll();await refreshCodeSessions()}catch(e){toast(e.message)}};
+sendCodePrompt=async function(){const prompt=$('codePrompt').value.trim();if(!prompt&&codeIsRunning(currentCodeSessionData)){try{const row=await request(`/api/code/sessions/${currentCodeSession}/stop`,{method:'POST',body:'{}'});renderCodeSession(row)}catch(e){toast(e.message)}return}if(!prompt)return;$('codePrompt').value='';updateCodeSendState();const selected=codeSourcePayload();if(currentCodeSessionData&&codeCanGuide(currentCodeSessionData)){try{const row=await request(`/api/code/sessions/${currentCodeSession}/guide`,{method:'POST',body:JSON.stringify({prompt,mode:'queue',model_change:selected})});renderCodeSession(row)}catch(e){toast(e.message)}return}try{const previous=currentCodeSessionData?.settings?.model||currentCodeSessionData?.settings?.active_profile_id||'';await persistCodeControls();const row=await request('/api/code/sessions',{method:'POST',body:JSON.stringify({...selected,previous_model:previous,prompt,attachments:codeAttachmentData})});codeAttachmentData=[];renderCodeAttachments();currentCodeSession=row.id;renderCodeSession(row);startCodePoll();await refreshCodeSessions()}catch(e){toast(e.message)}};
 $('codeSend').onclick=sendCodePrompt;$('codePrompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendCodePrompt()}};
 '''+"</script></body></html>",
     1,
@@ -1293,8 +1452,8 @@ PAGE = PAGE.replace(
 )
 
 PAGE = PAGE.replace(
-    '<label>思考深度 <span id="reasoningValue">中</span></label><div class="segmented-range"><input id="codeReasoning" type="range" min="0" max="5" value="2" step="1"><div class="range-labels"><span>无</span><span>低</span><span>中</span><span>高</span><span>极高</span><span>最大</span></div></div>',
-    '<label>智能 <span id="reasoningValue">中</span></label><div class="segmented-range"><input id="codeReasoning" type="range" min="0" max="5" value="1" step="1"><div class="range-dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="range-labels"><span>低</span><span>中</span><span>高</span><span>极高</span><span>最高</span><span>Ultra</span></div></div><span class="help">越高会执行更多搜索、检查与验证，通常效果更好，但耗时和 token 也更多。</span>',
+    '<label>思考深度 <span id="reasoningValue">中</span></label><div class="segmented-range"><input id="codeReasoning" type="range" min="0" max="5" value="2" step="0.01"><div class="range-labels"><span>无</span><span>低</span><span>中</span><span>高</span><span>极高</span><span>最大</span></div></div>',
+    '<label>智能 <span id="reasoningValue">中</span></label><div class="segmented-range"><input id="codeReasoning" type="range" min="0" max="5" value="1" step="0.01"><div class="range-dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="range-labels"><span>低</span><span>中</span><span>高</span><span>极高</span><span>最高</span><span>Ultra</span></div></div><span class="help">越高会执行更多搜索、检查与验证，通常效果更好，但耗时和 token 也更多。</span>',
     1,
 )
 PAGE = PAGE.replace(
@@ -1311,7 +1470,7 @@ PAGE = PAGE.replace(
     "</script></body></html>",
     r'''
 function formatCodeElapsed(ms){const seconds=Math.max(0,Math.round(Number(ms||0)/1000)),hours=Math.floor(seconds/3600),minutes=Math.floor(seconds%3600/60),rest=seconds%60;if(currentLang==='zh')return(hours?hours+' 小时 ':'')+(minutes?minutes+' 分钟 ':(!hours?'0 分钟 ':''))+(hours?'':rest+' 秒');return(hours?hours+'h ':'')+(minutes?minutes+'m ':(!hours?'0m ':''))+(hours?'':rest+'s')}
-function renderCodeProcessState(row){const bar=$('codeProcessBar'),timeline=$('codeTimeline'),overview=$('codeProcessOverview'),button=$('codeProcessToggle');if(!bar||!timeline||!overview||!button)return;const running=codeIsRunning(row);bar.hidden=running;timeline.classList.toggle('process-collapsed',!running&&!codeProcessExpanded);button.textContent=(currentLang==='zh'?'用时 ':'Time ')+formatCodeElapsed(row.duration_ms||0)+(codeProcessExpanded?'⌄':'›');button.setAttribute('aria-expanded',String(codeProcessExpanded));const summary=[...(row.events||[])].reverse().find(e=>e.kind==='assistant'&&e.phase==='summary');overview.hidden=running||codeProcessExpanded||!summary;overview.textContent=summary?.detail||''}
+function renderCodeProcessState(row){const bar=$('codeProcessBar'),timeline=$('codeTimeline'),overview=$('codeProcessOverview');if(bar)bar.hidden=true;if(overview)overview.hidden=true;if(timeline)timeline.classList.remove('process-collapsed')}
 const _orbitHistoryRenderSession=renderCodeSession;renderCodeSession=function(row){_orbitHistoryRenderSession(row);renderCodeProcessState(row)};
 $('codeProcessToggle').onclick=()=>{codeProcessExpanded=!codeProcessExpanded;if(currentCodeSessionData)renderCodeProcessState(currentCodeSessionData)};
 ''' + "</script></body></html>",
@@ -1331,7 +1490,7 @@ function codeToolKind(x){return x.tool==='shell'?'Shell':x.tool==='web_search'?'
 function renderCodeToolRows(tools){const editedFiles=new Set(tools.flatMap(x=>(x.file_changes||[]).map(f=>f.path))),runs=tools.filter(x=>x.tool==='shell').length,searches=tools.filter(x=>['search','web_search','read_file','list_files'].includes(x.tool)).length,running=tools.filter(x=>x.status==='running').length,summary=[currentLang==='zh'?`${running?'正在调用':'调用了'} ${tools.length} 个工具`:`${running?'Using':'Used'} ${tools.length} tools`];if(editedFiles.size)summary.push(currentLang==='zh'?`编辑 ${editedFiles.size} 个文件`:`edited ${editedFiles.size} files`);if(runs)summary.push(currentLang==='zh'?`运行 ${runs} 条命令`:`ran ${runs} commands`);if(searches)summary.push(currentLang==='zh'?`${searches} 次搜索/查看`:`${searches} searches/views`);return`<div class="tool-run-group"><div class="tool-run-summary"><span>✎</span><span>${summary.join(' · ')}</span></div>${tools.map(x=>{const v=codeToolView(x),state=x.status==='running'?'正在运行':x.status==='failed'?'失败':'成功';return`<details class="tool-run-row ${x.status==='failed'?'failed':''}" ${x.status==='running'?'open':''}><summary><span class="tool-run-icon">${v.icon}</span><span class="tool-run-label">${v.label}</span><span class="tool-run-arrow">›</span></summary><div class="tool-run-output"><div class="tool-output-head"><span>${codeToolKind(x)}</span><button class="button ghost" style="padding:4px 7px" onclick="event.preventDefault();event.stopPropagation();copyText(this.parentElement.nextElementSibling.innerText)">复制</button></div><pre style="margin:0;white-space:pre-wrap">${v.body}</pre><div class="tool-output-foot">${state}</div></div></details>`}).join('')}</div>`}
 function codeRunningActionLabel(tool,fallback){if(!tool)return'正在思考 · '+fallback;if(tool.tool==='web_search')return`正在搜索网页${tool.query?' · '+tool.query:''}`;if(tool.tool==='search')return`正在查询文件/代码${tool.query?' · '+tool.query:''}`;if(tool.tool==='apply_patch'){const paths=(tool.file_changes||[]).map(x=>x.path).filter(Boolean).join(', ')||tool.path||'';return`正在编辑${paths?' · '+paths:''}`};if(tool.tool==='read_file'||tool.tool==='list_files')return`正在查看${tool.path?' · '+tool.path:''}`;if(tool.tool==='shell')return`正在运行${tool.command?' · '+tool.command:''}`;if(tool.tool==='computer')return`正在操作鼠标键盘${tool.action?' · '+tool.action:''}`;return`正在执行 · ${tool.title||fallback}`}
 function codeStageActionLabel(tools,running,fallback){if(running)return codeRunningActionLabel([...tools].reverse().find(x=>x.status==='running')||tools[tools.length-1],fallback)+` · ${currentLang==='zh'?'已调用':'used'} ${tools.length} ${currentLang==='zh'?'个工具':'tools'}`;if(!tools.length)return'已完成 · '+fallback;const files=new Map();for(const tool of tools)for(const file of(tool.file_changes||[]))if(file.path)files.set(file.path,file.status||'modified');const counts={added:0,modified:0,deleted:0};for(const status of files.values())counts[status]=(counts[status]||0)+1;const parts=[currentLang==='zh'?`调用了 ${tools.length} 个工具`:`Used ${tools.length} tools`];if(counts.added)parts.push(`已创建 ${counts.added} 个文件`);if(counts.modified)parts.push(`已编辑 ${counts.modified} 个文件`);if(counts.deleted)parts.push(`已删除 ${counts.deleted} 个文件`);const web=tools.filter(x=>x.tool==='web_search').length,search=tools.filter(x=>x.tool==='search').length,reads=tools.filter(x=>['read_file','list_files'].includes(x.tool)).length,shell=tools.filter(x=>x.tool==='shell').length,computer=tools.filter(x=>x.tool==='computer').length;if(web)parts.push(`已搜索网页 ${web} 次`);if(search)parts.push(`已搜索文件/代码 ${search} 次`);if(reads)parts.push(`已查看文件 ${reads} 次`);if(shell)parts.push(`已运行 ${shell} 条命令`);if(computer)parts.push(`已操作鼠标键盘 ${computer} 次`);return parts.join(' · ')}
-function renderThreeLevelCodeTimeline(row){const events=row.events||[],parts=[];for(let i=0;i<events.length;){const event=events[i];if(event.kind==='assistant'&&event.phase!=='summary'){const tools=[];let cursor=i+1;while(cursor<events.length&&events[cursor].kind==='tool')tools.push(events[cursor++]);const running=tools.some(x=>x.status==='running'),plain=String(event.detail||event.title||'执行阶段').replace(/\s+/g,' ').trim(),stageTitle=codeStageActionLabel(tools,running,plain||event.title);parts.push(`<div class="code-stage-message">${esc(event.detail||event.title||'')}</div>${tools.length?`<details class="code-stage ${running?'running':''}" ${running?'open':''}><summary><span class="code-stage-title">${esc(stageTitle.slice(0,150))}</span><span class="code-stage-arrow">›</span></summary>${renderCodeToolRows(tools)}</details>`:''}`);i=cursor;continue}if(event.kind==='tool'){const tools=[];while(i<events.length&&events[i].kind==='tool')tools.push(events[i++]);parts.push(renderCodeToolRows(tools));continue}parts.push(renderCodeEvent(event,row));i++}return parts.join('')}
+function renderThreeLevelCodeTimeline(row){const events=row.events||[],parts=[];for(let i=0;i<events.length;){const event=events[i];if(event.kind==='assistant'&&event.phase==='summary'){i++;continue}if(event.kind==='assistant'){const tools=[];let cursor=i+1;while(cursor<events.length&&events[cursor].kind==='tool')tools.push(events[cursor++]);const running=tools.some(x=>x.status==='running'),plain=String(event.detail||event.title||'执行阶段').replace(/\s+/g,' ').trim(),stageTitle=codeStageActionLabel(tools,running,plain||event.title);parts.push(`<div class="code-stage-message">${codeRichText(event.detail||event.title||'')}</div>${tools.length?`<details class="code-stage ${running?'running':''}" ${running?'open':''}><summary><span class="code-stage-title">${esc(stageTitle.slice(0,150))}</span><span class="code-stage-arrow">›</span></summary>${renderCodeToolRows(tools)}</details>`:''}`);i=cursor;continue}if(event.kind==='tool'){const tools=[];while(i<events.length&&events[i].kind==='tool')tools.push(events[i++]);parts.push(renderCodeToolRows(tools));continue}parts.push(renderCodeEvent(event,row));i++}return parts.join('')}
 renderCompactCodeTimeline=renderThreeLevelCodeTimeline;
 ''' + "</script></body></html>",
     1,
@@ -1536,10 +1695,10 @@ input,select,textarea{border:1px solid rgba(55,65,82,.1)!important;border-radius
 #chat .composer-zone{left:5.5vw!important;right:5.5vw!important;bottom:22px!important}#chat .composer{min-height:62px!important;padding:10px 12px!important;border:1px solid rgba(55,65,82,.11)!important;border-radius:16px!important;background:rgba(251,252,253,.78)!important;backdrop-filter:blur(34px) saturate(165%)!important}.composer textarea{background:transparent!important;border:0!important;outline:0!important}.composer select{background:transparent!important;border:0!important}
 #train.page,#models.page,#codeApi.page,#settings.page{max-width:1100px!important}.form-stack{gap:15px!important}.field{gap:6px!important}.field label{font-size:12px!important;font-weight:580!important;color:#59616d!important}.detail-grid,.form-grid{gap:12px!important}.metric{border:1px solid rgba(55,65,82,.08)!important;border-radius:12px!important;background:rgba(255,255,255,.35)!important}
 .model-library-card{border-radius:15px!important;background:rgba(255,255,255,.42)!important}.model-library-row{min-height:64px!important;padding:11px 13px!important;border-bottom:1px solid rgba(55,65,82,.07)!important;background:transparent!important}.model-library-row:hover{background:rgba(255,255,255,.46)!important}.model-source-badge{border-radius:7px!important}.model-row-menu{border:1px solid rgba(55,65,82,.1)!important;border-radius:12px!important;background:rgba(247,249,252,.94)!important;backdrop-filter:blur(36px)!important}
-#code.page{max-width:none!important}.code-layout{gap:0!important}.code-main{border:0!important;background:transparent!important;backdrop-filter:none!important}.code-main>.panel-head{padding-left:22px!important;padding-right:22px!important}.code-timeline{max-width:880px!important;margin:0 auto!important;padding:24px 18px 190px!important}.code-stage{border:1px solid rgba(55,65,82,.09)!important;border-radius:13px!important;background:rgba(255,255,255,.38)!important}.event-card,.guidance-card,.tool-run-output{border:1px solid rgba(55,65,82,.08)!important;border-radius:12px!important;background:rgba(255,255,255,.42)!important}.code-composer-zone{left:max(24px,calc((100% - 880px)/2))!important;right:max(24px,calc((100% - 880px)/2))!important;bottom:20px!important}.code-composer{border:1px solid rgba(55,65,82,.11)!important;border-radius:16px!important;background:rgba(250,251,253,.82)!important;backdrop-filter:blur(36px) saturate(165%)!important}.liquid-pill{border:1px solid rgba(55,65,82,.09)!important;background:rgba(249,251,253,.75)!important}.round-action,.send-or-guide{border-radius:10px!important}.advanced-pop{border:1px solid rgba(55,65,82,.1)!important;border-radius:14px!important;background:rgba(247,249,252,.94)!important;backdrop-filter:blur(38px)!important}.code-change-actions{border-radius:13px!important;background:rgba(255,255,255,.46)!important}
+#code.page{max-width:none!important}.code-layout{gap:0!important}.code-main{border:0!important;background:transparent!important;backdrop-filter:none!important}.code-main>.panel-head{padding-left:22px!important;padding-right:22px!important}.code-timeline{max-width:880px!important;margin:0 auto!important;padding:24px 18px 190px!important}.code-stage,.event-card,.guidance-card{border:0!important;background:transparent!important}.tool-run-output{border:1px solid rgba(55,65,82,.08)!important;border-radius:12px!important;background:rgba(255,255,255,.42)!important}.code-composer-zone{left:max(24px,calc((100% - 880px)/2))!important;right:max(24px,calc((100% - 880px)/2))!important;bottom:20px!important}.code-composer{border:1px solid rgba(55,65,82,.11)!important;border-radius:16px!important;background:rgba(250,251,253,.82)!important;backdrop-filter:blur(36px) saturate(165%)!important}.liquid-pill{border:1px solid rgba(55,65,82,.09)!important;background:rgba(249,251,253,.75)!important}.round-action,.send-or-guide{border-radius:10px!important}.advanced-pop{border:1px solid rgba(55,65,82,.1)!important;border-radius:14px!important;background:rgba(247,249,252,.94)!important;backdrop-filter:blur(38px)!important}.code-change-actions{border:0!important;border-radius:0!important;background:transparent!important;backdrop-filter:none!important}
 .review-drawer,.code-file-drawer{border-left:1px solid rgba(55,65,82,.09)!important;background:rgba(247,249,251,.92)!important;backdrop-filter:blur(38px) saturate(155%)!important}
 .memory-controls{display:grid!important;gap:7px!important;margin:12px 0!important}.memory-controls label{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:14px!important;padding:10px 11px!important;border:1px solid rgba(55,65,82,.08)!important;border-radius:11px!important;background:rgba(255,255,255,.35)!important}.memory-controls label>span{display:grid!important;gap:2px!important}.memory-controls small{color:#747c88!important;font-size:11px!important}.memory-controls input{width:36px!important;height:21px!important;accent-color:#1473e6!important}
-.segmented-range{position:relative!important;display:grid!important;grid-template-rows:54px auto!important;gap:8px!important;padding:0!important;margin-top:8px!important}.segmented-range input[type="range"]{position:relative!important;z-index:3!important;grid-row:1!important;width:100%!important;height:54px!important;margin:0!important;padding:0 17px!important;border:1px solid rgba(62,72,88,.13)!important;border-radius:17px!important;background:linear-gradient(90deg,#1687f8 0 var(--range-fill,20%),rgba(241,244,248,.84) var(--range-fill,20%) 100%)!important;backdrop-filter:blur(28px) saturate(175%)!important;-webkit-appearance:none!important;appearance:none!important;outline:0!important}.segmented-range input[type="range"]::-webkit-slider-runnable-track{height:54px!important;background:transparent!important}.segmented-range input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none!important;width:40px!important;height:40px!important;margin-top:7px!important;border:1px solid rgba(65,74,88,.1)!important;border-radius:14px!important;background:#fff!important}.range-dots{pointer-events:none;position:absolute!important;z-index:4!important;left:22px!important;right:22px!important;top:0!important;height:54px!important;display:grid!important;grid-template-columns:repeat(6,1fr)!important;align-items:center!important}.range-dots i{justify-self:center;width:8px;height:8px;border-radius:50%;background:rgba(70,78,91,.25)}.range-labels{grid-row:2!important;display:grid!important;grid-template-columns:repeat(6,1fr)!important;color:#727a86!important;font-size:10px!important}.range-labels span{text-align:center!important}.range-labels span:first-child{text-align:left!important}.range-labels span:last-child{text-align:right!important}.composer-reasoning{padding:12px!important}.workspace-field .help{display:block!important;margin-top:6px!important;line-height:1.4!important}
+.segmented-range{position:relative!important;display:grid!important;grid-template-rows:54px auto!important;gap:8px!important;padding:0!important;margin-top:8px!important;-webkit-app-region:no-drag!important}.segmented-range input[type="range"]{position:relative!important;z-index:3!important;grid-row:1!important;width:100%!important;height:54px!important;margin:0!important;padding:0 17px!important;border:1px solid rgba(62,72,88,.13)!important;border-radius:999px!important;background:linear-gradient(90deg,#1687f8 0 var(--range-fill,20%),rgba(241,244,248,.84) var(--range-fill,20%) 100%)!important;backdrop-filter:blur(28px) saturate(175%)!important;-webkit-appearance:none!important;appearance:none!important;outline:0!important;-webkit-app-region:no-drag!important;cursor:pointer!important;touch-action:none!important}.segmented-range input[type="range"]::-webkit-slider-runnable-track{height:54px!important;border-radius:999px!important;background:transparent!important}.segmented-range input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none!important;width:40px!important;height:40px!important;margin-top:7px!important;border:1px solid rgba(65,74,88,.1)!important;border-radius:50%!important;background:#fff!important}.range-dots{pointer-events:none;position:absolute!important;z-index:4!important;left:22px!important;right:22px!important;top:0!important;height:54px!important;display:grid!important;grid-template-columns:repeat(6,1fr)!important;align-items:center!important}.range-dots i{justify-self:center;width:8px;height:8px;border-radius:50%;background:rgba(70,78,91,.25)}.range-labels{grid-row:2!important;display:grid!important;grid-template-columns:repeat(6,1fr)!important;color:#727a86!important;font-size:10px!important}.range-labels span{text-align:center!important}.range-labels span:first-child{text-align:left!important}.range-labels span:last-child{text-align:right!important}.composer-reasoning{padding:12px!important}.workspace-field .help{display:block!important;margin-top:6px!important;line-height:1.4!important}
 @media(max-width:960px){.app{grid-template-columns:242px minmax(0,1fr)!important}.app.sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)!important}.sidebar{width:242px!important}.main{margin-left:0!important}.content{padding-left:20px!important;padding-right:20px!important}.messages{padding-left:28px!important;padding-right:28px!important}}
 @media(prefers-reduced-transparency:reduce){.product-menu,.toolbar-nav button{background:#f3f5f8;backdrop-filter:none}}
 """ + "</style>",
@@ -1575,6 +1734,106 @@ PAGE = PAGE.replace(
     r'''
 .permission-picker{position:relative;flex:0 0 auto}.permission-trigger{display:flex;align-items:center;gap:7px;height:34px;padding:0 8px;border:0;border-radius:10px;background:transparent;color:#313740;font-size:12px;font-weight:560}.permission-trigger:hover{background:rgba(255,255,255,.55)}.permission-glyph{display:grid;place-items:center;width:23px;height:23px;color:#15191f;font-size:14px;font-style:normal;font-weight:720;line-height:1}.permission-glyph.hand:before{content:'✋';font-size:18px;filter:grayscale(1);transform:translateY(-1px)}.permission-glyph.hand{font-size:0}.permission-glyph.terminal,.permission-glyph.danger{border:2px solid currentColor;border-radius:8px}.permission-glyph.terminal{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}.permission-glyph.danger{clip-path:polygon(50% 0,93% 18%,88% 72%,50% 100%,12% 72%,7% 18%);border-radius:0}.permission-menu{position:absolute;z-index:60;left:-10px;bottom:43px;width:390px;padding:12px;border:1px solid rgba(255,255,255,.9);border-radius:18px;background:rgba(247,249,252,.94);backdrop-filter:blur(44px) saturate(180%);color:#20242b}.permission-help{padding:0 10px 9px;color:#6e7682;font-size:12px}.permission-help a{margin-left:6px;color:inherit;text-decoration:underline}.permission-menu>button{display:grid;grid-template-columns:34px minmax(0,1fr) 20px;align-items:center;gap:10px;width:100%;padding:11px 10px;border:0;border-radius:12px;background:transparent;color:inherit;text-align:left}.permission-menu>button:hover{background:rgba(255,255,255,.68)}.permission-menu>button>span:nth-child(2){display:grid;gap:3px}.permission-menu b{font-size:15px;font-weight:620}.permission-menu small{color:#707885;font-size:12px;line-height:1.35}.permission-menu i{display:none;font-size:20px;font-style:normal}.permission-menu>button.selected i{display:block}
 ''' + "</style>",
+    1,
+)
+
+# Conversation surfaces own their scroll position. Live polling may append new
+# content, but it must never pull a user who is reviewing an earlier turn back
+# to the bottom. The compact turn ruler is only shown in a maximized window.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+#chat.page.active,#code.page.active{height:100%!important;min-height:0!important;overflow:hidden!important}
+#chat .layout,#code .code-layout{height:100%!important;min-height:0!important}
+#chat .chat-panel,#code .code-main{height:100%!important;min-height:0!important;overflow:hidden!important}
+#messages,#codeTimeline{min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain!important;-webkit-overflow-scrolling:touch!important;-webkit-app-region:no-drag!important;touch-action:pan-y!important;scroll-behavior:auto!important}
+#messages{position:relative!important}.content.code-page-active{overflow:hidden!important}
+.turn-ruler{display:none;position:fixed;z-index:55;left:248px;top:50%;width:22px;max-height:58vh;transform:translateY(-50%);padding:8px 0;-webkit-app-region:no-drag;overflow:visible}
+body.orbit-window-maximized .turn-ruler.has-turns{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.turn-ruler button{display:block;width:8px;height:2px;min-height:2px;padding:0;border:0;border-radius:2px;background:rgba(76,83,94,.25);transition:width .16s ease,background .16s ease;cursor:pointer}
+.turn-ruler button:hover,.turn-ruler button.active{width:19px;background:#444b55}
+.turn-ruler-preview{position:absolute;left:29px;width:320px;max-height:128px;padding:11px 13px;border:1px solid rgba(70,78,92,.13);border-radius:13px;background:rgba(247,248,250,.94);backdrop-filter:blur(30px) saturate(160%);box-shadow:0 12px 34px rgba(31,38,50,.12);color:#303640;font-size:12px;line-height:1.45;overflow:hidden;pointer-events:none}
+@media(max-width:1279px){.turn-ruler{display:none!important}}
+@media(min-width:1280px){.app.sidebar-collapsed~.turn-ruler,.app.sidebar-collapsed .turn-ruler{left:12px}}
+''' + "</style>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+let orbitChatFollowing=true,orbitChatProgrammatic=false;
+const orbitMessages=$('messages');
+function orbitNearBottom(surface,slack=72){return !surface||surface.scrollHeight-surface.scrollTop-surface.clientHeight<slack}
+function orbitRestoreScroll(surface,top,follow){requestAnimationFrame(()=>{orbitChatProgrammatic=true;surface.scrollTop=follow?surface.scrollHeight:Math.min(top,Math.max(0,surface.scrollHeight-surface.clientHeight));requestAnimationFrame(()=>orbitChatProgrammatic=false)})}
+orbitMessages?.addEventListener('scroll',()=>{if(!orbitChatProgrammatic)orbitChatFollowing=orbitNearBottom(orbitMessages)} ,{passive:true});
+orbitMessages?.addEventListener('wheel',event=>{if(event.deltaY<0)orbitChatFollowing=false},{passive:true});
+const _orbitScrollableAddMessage=addMessage;
+addMessage=function(role,text){const top=orbitMessages.scrollTop,follow=orbitChatFollowing,result=_orbitScrollableAddMessage(role,text);orbitRestoreScroll(orbitMessages,top,follow);requestAnimationFrame(()=>renderTurnRuler());return result};
+const _orbitScrollableThinking=addThinkingMessage;
+addThinkingMessage=function(){const top=orbitMessages.scrollTop,follow=orbitChatFollowing,result=_orbitScrollableThinking();orbitRestoreScroll(orbitMessages,top,follow);requestAnimationFrame(()=>renderTurnRuler());return result};
+const _orbitScrollableFinishThinking=finishThinking;
+finishThinking=function(element,response){const top=orbitMessages.scrollTop,follow=orbitChatFollowing,result=_orbitScrollableFinishThinking(element,response);orbitRestoreScroll(orbitMessages,top,follow);requestAnimationFrame(()=>renderTurnRuler());return result};
+const _orbitScrollableOpenConversation=openConversation;
+openConversation=async function(encoded){orbitChatFollowing=true;const result=await _orbitScrollableOpenConversation(encoded);orbitRestoreScroll(orbitMessages,0,true);renderTurnRuler();return result};
+
+const orbitTurnRuler=document.createElement('nav');orbitTurnRuler.id='orbitTurnRuler';orbitTurnRuler.className='turn-ruler';orbitTurnRuler.setAttribute('aria-label','本轮对话导航');document.body.appendChild(orbitTurnRuler);
+function orbitWindowIsMaximized(){return window.innerWidth>=1280&&(window.outerWidth>=screen.availWidth-36||window.innerWidth>=screen.availWidth-60)}
+function orbitTurnTargets(){
+  if($('code')?.classList.contains('active'))return [...$('codeTimeline').querySelectorAll('.code-elapsed')].filter(node=>node.offsetParent);
+  if($('chat')?.classList.contains('active'))return [...orbitMessages.querySelectorAll('.bubble.user')].filter(node=>node.offsetParent);
+  return [];
+}
+function orbitTurnSurface(){return $('code')?.classList.contains('active')?$('codeTimeline'):orbitMessages}
+function orbitTurnPreview(node){let text=String(node.innerText||node.textContent||'');if(node.matches?.('.bubble.user')){let next=node.nextElementSibling;while(next&&!next.matches('.bubble.user')){text+=' '+String(next.innerText||next.textContent||'');next=next.nextElementSibling}}else if(node.matches?.('.code-elapsed')){const summary=node.nextElementSibling;if(summary?.classList.contains('code-final-summary'))text+=' '+String(summary.innerText||summary.textContent||'')}return text.replace(/\s+/g,' ').trim().slice(0,220)}
+function updateTurnRulerActive(){const surface=orbitTurnSurface(),targets=orbitTurnTargets();if(!surface||!targets.length)return;const point=surface.scrollTop+surface.clientHeight*.35;let best=0;targets.forEach((node,index)=>{if(node.offsetTop<=point)best=index});[...orbitTurnRuler.querySelectorAll('button')].forEach((button,index)=>button.classList.toggle('active',index===best))}
+function renderTurnRuler(){
+  document.body.classList.toggle('orbit-window-maximized',orbitWindowIsMaximized());
+  const targets=orbitTurnTargets();orbitTurnRuler.classList.toggle('has-turns',targets.length>1);orbitTurnRuler.innerHTML='';
+  targets.forEach((node,index)=>{const button=document.createElement('button');button.type='button';button.setAttribute('aria-label',`第 ${index+1} 个阶段`);button.onclick=()=>{node.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});setTimeout(updateTurnRulerActive,180)};button.onmouseenter=()=>{const preview=document.createElement('div');preview.className='turn-ruler-preview';preview.textContent=orbitTurnPreview(node);preview.style.top=Math.max(-8,Math.min(button.offsetTop-18,orbitTurnRuler.clientHeight-112))+'px';orbitTurnRuler.appendChild(preview)};button.onmouseleave=()=>orbitTurnRuler.querySelector('.turn-ruler-preview')?.remove();orbitTurnRuler.appendChild(button)});
+  updateTurnRulerActive();
+}
+orbitMessages?.addEventListener('scroll',updateTurnRulerActive,{passive:true});$('codeTimeline')?.addEventListener('scroll',updateTurnRulerActive,{passive:true});window.addEventListener('resize',renderTurnRuler,{passive:true});
+const _orbitRulerRenderCodeSession=renderCodeSession;renderCodeSession=function(row){_orbitRulerRenderCodeSession(row);requestAnimationFrame(renderTurnRuler)};
+const _orbitRulerShowPage=showPage;showPage=function(name){const result=_orbitRulerShowPage(name);requestAnimationFrame(renderTurnRuler);return result};
+setTimeout(renderTurnRuler,0);
+''' + "</script></body></html>",
+    1,
+)
+
+# The composer is one continuous glass surface. Advanced model and speed
+# choices use a left-opening cascading glass panel instead of stacked fields.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+#code .code-composer{overflow:visible!important;padding:9px 11px 8px!important;border:1px solid rgba(255,255,255,.82)!important;border-radius:20px!important;background:linear-gradient(145deg,rgba(255,255,255,.76),rgba(231,236,244,.54))!important;backdrop-filter:blur(42px) saturate(185%)!important;-webkit-backdrop-filter:blur(42px) saturate(185%)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.92),0 12px 34px rgba(35,43,58,.08)!important}
+#code .code-input,#code .composer-bottom,#code .permission-trigger,#codeAdvanced,#codeMic,#codeAttach{background:transparent!important;border:0!important;box-shadow:none!important}
+#codeAdvanced{min-width:0!important;height:34px!important;padding:0 7px!important;font-size:13px!important;font-weight:430!important;letter-spacing:-.012em!important;color:#272c34!important}
+#codeAdvanced:after{margin-left:3px!important;color:#6f7680!important}.composer-bottom{gap:5px!important}.composer-bottom .round-action{width:34px!important;height:34px!important}.permission-trigger{font-weight:450!important}
+#codeAdvancedPanel{overflow:visible!important;width:370px!important;padding:8px!important;border:1px solid rgba(255,255,255,.84)!important;border-radius:17px!important;background:linear-gradient(145deg,rgba(251,252,253,.91),rgba(231,236,244,.78))!important;backdrop-filter:blur(42px) saturate(180%)!important;-webkit-backdrop-filter:blur(42px) saturate(180%)!important;box-shadow:0 18px 50px rgba(27,35,49,.14),inset 0 1px rgba(255,255,255,.96)!important}
+.composer-advanced-toggle{font-weight:480!important}.composer-setting{position:relative!important;display:flex!important;align-items:center!important;justify-content:space-between!important;min-height:42px!important;font-weight:460!important}.composer-setting>span:after{content:' ›';color:#777f8b}.composer-setting>select{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}
+.composer-cascade{display:none;position:absolute;z-index:90;right:calc(100% + 9px);top:-7px;width:260px;max-height:330px;padding:7px;border:1px solid rgba(255,255,255,.86);border-radius:16px;background:linear-gradient(145deg,rgba(250,251,253,.94),rgba(230,235,243,.84));backdrop-filter:blur(42px) saturate(180%);-webkit-backdrop-filter:blur(42px) saturate(180%);box-shadow:0 18px 50px rgba(27,35,49,.15);overflow:auto}
+.composer-setting:hover>.composer-cascade,.composer-setting:focus-within>.composer-cascade{display:grid}.composer-cascade button{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:36px;padding:7px 9px;border:0;border-radius:10px;background:transparent;color:#292e36;font-size:13px;font-weight:430;text-align:left}.composer-cascade button:hover{background:rgba(255,255,255,.66)}.composer-cascade button.selected:after{content:'✓';font-size:13px}
+''' + "</style>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+function installComposerCascades(){
+  ['codeModel','codeSpeed'].forEach(id=>{const select=$(id),row=select?.closest('.composer-setting');if(!select||!row||row.querySelector('.composer-cascade'))return;const cascade=document.createElement('div');cascade.className='composer-cascade';const rebuild=()=>{cascade.innerHTML=[...select.options].map(option=>`<button type="button" class="${option.value===select.value?'selected':''}" data-value="${esc(option.value)}"><span>${esc(option.textContent)}</span></button>`).join('');cascade.querySelectorAll('button').forEach(button=>button.onclick=event=>{event.stopPropagation();select.value=button.dataset.value;select.dispatchEvent(new Event('change',{bubbles:true}));rebuild()})};rebuild();row.appendChild(cascade);select.addEventListener('change',rebuild)});
+}
+const _orbitCascadeRefreshSettings=refreshCodeSettings;refreshCodeSettings=async function(){const result=await _orbitCascadeRefreshSettings();installComposerCascades();return result};installComposerCascades();
+function installReliableSegmentedSlider(slider){
+  if(!slider||slider.dataset.orbitPointerSlider==='1')return;slider.dataset.orbitPointerSlider='1';
+  let dragging=false;
+  const update=event=>{const rect=slider.getBoundingClientRect(),min=Number(slider.min||0),max=Number(slider.max||100),step=Number(slider.step||1),ratio=Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),raw=min+ratio*(max-min),value=Math.max(min,Math.min(max,Math.round(raw/step)*step));if(Number(slider.value)!==value){slider.value=String(value);slider.dispatchEvent(new Event('input',{bubbles:true}))}};
+  slider.addEventListener('pointerdown',event=>{dragging=true;slider.setPointerCapture?.(event.pointerId);update(event);event.preventDefault();event.stopPropagation()},{capture:true});
+  slider.addEventListener('pointermove',event=>{if(!dragging)return;update(event);event.preventDefault();event.stopPropagation()},{capture:true});
+  const finish=event=>{if(!dragging)return;dragging=false;slider.releasePointerCapture?.(event.pointerId);slider.dispatchEvent(new Event('change',{bubbles:true}));event.preventDefault();event.stopPropagation()};
+  slider.addEventListener('pointerup',finish,{capture:true});slider.addEventListener('pointercancel',finish,{capture:true});
+}
+document.querySelectorAll('.segmented-range input[type="range"]').forEach(installReliableSegmentedSlider);
+''' + "</script></body></html>",
     1,
 )
 PAGE = PAGE.replace(
@@ -1628,8 +1887,15 @@ PAGE = PAGE.replace(
     r'''
 const _orbit2RenderCodeEvent=renderCodeEvent;
 renderCodeEvent=function(event,row){
-  if(event.kind==='approval'&&row?.pending_approval?.approval_id!==event.approval_id&&row?.pending_approval?.id!==event.approval_id){
-    return `<div class="agent-event"><div class="event-card"><div class="event-detail"><b>${currentLang==='zh'?'已处理批准请求':'Approval handled'}</b><div class="small" style="margin-top:5px">${esc(event.detail||'')}</div></div></div></div>`;
+  if(event.kind==='approval_decision')return '';
+  if(event.kind==='approval'){
+    const pending=row?.pending_approval?.id===event.approval_id;
+    const decision=[...(row?.events||[])].reverse().find(item=>item.kind==='approval_decision'&&item.detail===event.detail);
+    if(!pending){
+      const label=decision?.title||(currentLang==='zh'?'已处理':'Handled');
+      return `<div class="agent-event approval-event resolved"><span class="approval-icon">${label.includes('拒')?'×':'✓'}</span><span><b>${esc(label)}</b><small>${esc(event.detail||'')}</small></span></div>`;
+    }
+    return `<div class="agent-event approval-event waiting"><span class="approval-icon">!</span><span><b>${currentLang==='zh'?'请求批准 · 等待批准':'Approval requested · Waiting'}</b><small>${esc(event.detail||'')}</small><span class="approval-actions"><button class="button primary" onclick="codeApprove(true)">${currentLang==='zh'?'批准':'Approve'}</button><button class="button" onclick="codeApprove(false)">${currentLang==='zh'?'拒绝':'Deny'}</button></span></span></div>`;
   }
   return _orbit2RenderCodeEvent(event,row);
 };
@@ -1641,3 +1907,327 @@ refreshConversations=async function(){
 ''' + "</script></body></html>",
     1,
 )
+
+# Orbit 2.0.1 visual correction: Codex-like text timeline, with glass reserved
+# for navigation and input controls. Only third-level command/diff output uses
+# a card surface.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+.sidebar{background:rgba(231,236,243,.42)!important;border-right:1px solid rgba(255,255,255,.62)!important;backdrop-filter:blur(52px) saturate(178%)!important;-webkit-backdrop-filter:blur(52px) saturate(178%)!important}
+.toolbar-nav{position:relative!important;gap:2px!important;padding:3px!important;border:1px solid rgba(255,255,255,.82)!important;border-radius:13px!important;background:linear-gradient(145deg,rgba(255,255,255,.72),rgba(221,229,240,.38))!important;backdrop-filter:blur(34px) saturate(195%)!important;-webkit-backdrop-filter:blur(34px) saturate(195%)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.92),inset 0 -1px 0 rgba(94,108,130,.06)!important}
+.toolbar-nav:before{content:''!important;display:block!important;position:absolute!important;inset:1px!important;border-radius:11px!important;pointer-events:none!important;background:linear-gradient(120deg,rgba(255,255,255,.5),transparent 48%)!important}
+.toolbar-nav button{position:relative!important;z-index:1!important;width:32px!important;height:30px!important;border:0!important;border-radius:9px!important;background:transparent!important;backdrop-filter:none!important;box-shadow:none!important}
+.toolbar-nav button+button{border-left:0!important}.toolbar-nav button:hover:not(:disabled){background:rgba(255,255,255,.58)!important}.toolbar-nav button:disabled{background:transparent!important;border:0!important;opacity:.34!important}
+.agent-event{padding:2px 0 12px 27px!important}.agent-event:after{display:none!important}.agent-event:before{left:7px!important;top:10px!important;width:7px!important;height:7px!important;border:0!important;background:#9aa1ab!important;box-shadow:none!important}
+.agent-event.assistant:before{background:#5e6978!important}.agent-event.thinking:before{background:#1787f8!important}.agent-event.error:before{background:var(--red)!important}
+.event-card,.guidance-card,.approval-box,.code-stage,.tool-run-group,.tool-run-row{border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important}
+.event-card{overflow:visible!important}.event-card>summary{min-height:28px!important;padding:4px 0!important}.event-card .event-detail{padding:3px 0 5px!important}.guidance-card{padding:5px 0!important}.code-stage-message{margin-left:27px!important;margin-right:0!important}.code-stage{margin-left:27px!important}.tool-run-group{margin:3px 0 13px 27px!important}.code-stage .tool-run-group{margin:3px 0 5px!important}.tool-run-summary{margin:0 0 3px!important}.tool-run-row summary{padding:5px 0!important}.tool-run-icon{border:0!important;border-radius:0!important;width:20px!important;height:20px!important;color:#858c96!important;font-size:15px!important}.tool-run-output{margin:6px 0 11px 27px!important;padding:13px!important;border:1px solid rgba(62,73,91,.08)!important;border-radius:12px!important;background:rgba(245,246,248,.82)!important}
+.approval-event{display:grid!important;grid-template-columns:20px minmax(0,1fr)!important;align-items:start!important;gap:8px!important}.approval-event:before{display:none!important}.approval-icon{display:grid;place-items:center;width:18px;height:18px;margin-top:2px;border:1.5px solid currentColor;border-radius:6px;color:#848b96;font-size:11px;font-weight:750}.approval-event.waiting .approval-icon{color:#d28518}.approval-event.resolved .approval-icon{color:#4b8d65}.approval-event b,.approval-event small{display:block}.approval-event b{font-size:13px;font-weight:600}.approval-event small{margin-top:3px;color:var(--muted);font-size:12px}.approval-actions{display:flex;gap:7px;margin-top:8px}.approval-actions .button{min-height:30px;padding:4px 10px}
+.current-activity{padding:7px 0!important;margin:0 18px!important;border:0!important;background:transparent!important}.activity-orbit{border-top-color:rgba(23,135,248,.2)!important}
+''' + "</style>",
+    1,
+)
+
+# Final structural cleanup. Earlier prototypes briefly placed a second set of
+# window controls inside the sidebar; leaving those nodes in the document made
+# the title area overlap on macOS even when later CSS looked correct. Keep one
+# navigation control group in the toolbar and make product initials typographic.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+.sidebar-top-controls{display:none!important}
+.sidebar .brand{min-height:52px!important;height:52px!important;margin:0 0 8px 12px!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important}
+.brand-switch{width:100%!important;height:52px!important;padding:0 13px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;font-weight:670!important}
+.brand-switch span:first-child{transform:none!important}.brand-switch:hover{background:transparent!important;color:var(--ink)!important}
+.product-choice{grid-template-columns:24px minmax(0,1fr)!important;gap:10px!important}.product-letter,.product-mark{display:block!important;width:24px!important;height:auto!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",sans-serif!important;font-size:16px!important;font-weight:650!important;line-height:1.2!important;text-align:center!important}
+.settings-workspace,.settings-main,.settings-directory{min-width:0!important}.settings-main{overscroll-behavior:contain!important}.settings-directory{background:rgba(231,236,243,.46)!important;box-shadow:none!important}
+''' + "</style>",
+    1,
+)
+
+# These decisive layout rules are intentionally emitted after every legacy
+# style layer so a reopened conversation cannot regress to the prototype UI.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+:root{--orbit-accent:#0a84ff}.app{grid-template-columns:291px minmax(0,1fr)!important}.sidebar{width:291px!important;box-shadow:none!important}.main{box-shadow:none!important}
+body.orbit-settings-active .app,.app:has(#settings.page.active){grid-template-columns:0 minmax(0,1fr)!important}body.orbit-settings-active .sidebar,.app:has(#settings.page.active)>.sidebar{visibility:hidden!important;width:0!important;overflow:hidden!important}body.orbit-settings-active .content,.app:has(#settings.page.active)>.content{padding:0!important}body.orbit-settings-active .topbar,.content:has(#settings.page.active)>.topbar{display:none!important}#settings.page.active{height:100vh!important}.settings-workspace{grid-template-columns:291px minmax(0,1fr)!important;margin:0!important}.settings-directory{padding:54px 15px 20px!important}.settings-main{padding:46px 48px 80px!important}
+#chat .messages{width:100%!important;padding:38px clamp(22px,4vw,58px) 154px!important;gap:14px!important;overscroll-behavior:contain!important;scroll-behavior:auto!important}#chat .bubble{width:auto!important;max-width:none!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:var(--ink)!important;line-height:1.62!important;text-align:left!important;white-space:pre-wrap!important}#chat .bubble.assistant{align-self:stretch!important;margin-right:clamp(0px,3vw,44px)!important}#chat .bubble.user{align-self:flex-end!important;max-width:min(72%,720px)!important;padding:10px 14px!important;border:1px solid rgba(255,255,255,.82)!important;border-radius:16px 16px 6px 16px!important;background:linear-gradient(145deg,rgba(239,242,247,.88),rgba(218,225,235,.68))!important;backdrop-filter:blur(28px) saturate(155%)!important;-webkit-backdrop-filter:blur(28px) saturate(155%)!important;box-shadow:inset 0 1px rgba(255,255,255,.92)!important}#chat .thinking-bubble{display:flex!important;background:transparent!important}.thinking-dot{background:var(--orbit-accent)!important}body.orbit-window-maximized #chat .messages{padding-left:max(48px,calc((100% - 820px)/2))!important;padding-right:max(48px,calc((100% - 820px)/2))!important}body.orbit-window-maximized #chat .bubble.assistant{margin-right:0!important}#sendButton,.send-or-guide,#codeSend{background:var(--orbit-accent)!important}.turn-ruler{left:297px!important}
+@media(max-width:960px){.app{grid-template-columns:261px minmax(0,1fr)!important}.sidebar{width:261px!important}.settings-workspace{grid-template-columns:261px minmax(0,1fr)!important}}@media(max-width:700px){#chat .bubble.user{max-width:88%!important}.settings-main{padding:28px 22px 70px!important}}
+''' + "</style>",
+    1,
+)
+
+# Give the product switch its own horizontal lane and push history down while
+# the glass product chooser is open.  This prevents the chooser from covering
+# recent conversations at desktop window sizes.
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+.sidebar .brand{margin-left:38px!important;width:calc(100% - 42px)!important;transition:margin-bottom .28s cubic-bezier(.2,.8,.2,1)!important}
+.sidebar .brand:has(.product-menu:not([hidden])){margin-bottom:224px!important}
+.brand-switch{padding-left:0!important;padding-right:8px!important}
+.product-menu{left:0!important;right:0!important;width:100%!important;max-width:100%!important}
+.sidebar-history{position:relative!important;z-index:1!important}
+''' + "</style>",
+    1,
+)
+
+# Active windows reveal the desktop tint through the material.  Inactive
+# windows settle toward quiet white, matching native macOS sidebar behavior.
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+(function installWindowMaterialState(){
+  const sync=()=>document.documentElement.classList.toggle('orbit-window-active',document.hasFocus());
+  window.addEventListener('focus',sync);window.addEventListener('blur',sync);sync();
+})();
+''' + "</script></body></html>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+.sidebar,.settings-directory{background:rgba(252,252,253,.91)!important;backdrop-filter:blur(52px) saturate(150%)!important;-webkit-backdrop-filter:blur(52px) saturate(150%)!important;transition:background-color .26s ease,backdrop-filter .26s ease!important}
+html.orbit-window-active .sidebar,html.orbit-window-active .settings-directory{background:linear-gradient(145deg,rgba(247,249,252,.58),rgba(223,230,240,.36))!important;backdrop-filter:blur(54px) saturate(185%)!important;-webkit-backdrop-filter:blur(54px) saturate(185%)!important}
+#codeAdvancedPanel,#codeAdvancedPanel *,#codeReasoning,#codeReasoning::-webkit-slider-thumb{user-select:none!important;-webkit-user-select:none!important;-webkit-app-region:no-drag!important}
+#codeAdvancedPanel{width:min(330px,calc(100vw - 48px))!important;padding:10px!important;touch-action:none!important}
+#codeAdvancedPanel .segmented-range{grid-template-rows:44px auto!important;gap:6px!important}
+#codeAdvancedPanel .segmented-range input[type="range"]{height:44px!important;padding:0 14px!important;touch-action:pan-x!important;cursor:grab!important}
+#codeAdvancedPanel .segmented-range input[type="range"]:active{cursor:grabbing!important}
+#codeAdvancedPanel .segmented-range input[type="range"]::-webkit-slider-runnable-track{height:44px!important}
+#codeAdvancedPanel .segmented-range input[type="range"]::-webkit-slider-thumb{width:34px!important;height:34px!important;margin-top:5px!important}
+#codeAdvancedPanel .range-dots{left:18px!important;right:18px!important;height:44px!important}
+''' + "</style>",
+    1,
+)
+
+# Compact physical intelligence control: thin oval track, oversized thumb,
+# and a real 1×/1.5× speed toggle synchronized with the advanced speed field.
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+(function installPhysicalReasoningControl(){
+  const range=document.getElementById('codeReasoning'),host=document.getElementById('composerReasoning'),speed=document.getElementById('codeSpeed');
+  if(!range||!host||host.dataset.physicalControl==='1')return;
+  host.dataset.physicalControl='1';
+  const lightning=document.createElement('button');lightning.type='button';lightning.id='reasoningSpeedToggle';lightning.className='reasoning-speed-toggle';
+  const syncSpeed=()=>{const fast=speed?.value==='fast';lightning.innerHTML=`<span>ϟ</span><small>${fast?'1.5×':'1×'}</small>`;lightning.title=fast?'1.5 倍速度':'标准速度'};
+  lightning.onclick=event=>{event.preventDefault();event.stopPropagation();if(!speed)return;speed.value=speed.value==='fast'?'balanced':'fast';speed.dispatchEvent(new Event('change',{bubbles:true}));syncSpeed()};
+  host.prepend(lightning);speed?.addEventListener('change',syncSpeed);syncSpeed();
+  let dragging=false;
+  const updateFromPointer=event=>{const rect=range.getBoundingClientRect(),min=Number(range.min||0),max=Number(range.max||5),step=Number(range.step||1),ratio=Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),raw=min+ratio*(max-min),next=Math.max(min,Math.min(max,Math.round(raw/step)*step));if(Number(range.value)!==next){range.value=String(next);syncCodeSliders()}};
+  range.addEventListener('pointerdown',event=>{dragging=true;event.preventDefault();event.stopPropagation();range.setPointerCapture?.(event.pointerId);updateFromPointer(event)});
+  range.addEventListener('pointermove',event=>{if(!dragging)return;event.preventDefault();event.stopPropagation();updateFromPointer(event)});
+  const finish=event=>{if(!dragging)return;dragging=false;event.preventDefault();event.stopPropagation();range.releasePointerCapture?.(event.pointerId);persistCodeControls()};
+  range.addEventListener('pointerup',finish);range.addEventListener('pointercancel',finish);
+})();
+''' + "</script></body></html>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</style>",
+    r'''
+#composerReasoning{position:relative!important;padding:8px 8px 7px!important}
+.reasoning-speed-toggle{position:absolute;z-index:8;top:5px;right:6px;display:flex;align-items:center;gap:3px;min-width:42px;height:25px;padding:0 7px;border:0;border-radius:999px;background:rgba(255,255,255,.55);color:#616976;-webkit-app-region:no-drag!important}
+.reasoning-speed-toggle:hover{background:rgba(255,255,255,.82)}.reasoning-speed-toggle span{font-size:16px}.reasoning-speed-toggle small{font-size:9px;font-weight:650}
+#composerReasoning>.field>label{padding-right:52px!important}
+#codeAdvancedPanel .segmented-range{grid-template-rows:38px auto!important}
+#codeAdvancedPanel .segmented-range input[type="range"]{height:38px!important;padding:0!important;border:0!important;background:transparent!important;backdrop-filter:none!important}
+#codeAdvancedPanel .segmented-range input[type="range"]::-webkit-slider-runnable-track{height:28px!important;border:1px solid rgba(58,68,84,.12)!important;border-radius:999px!important;background:linear-gradient(90deg,#1687f8 0 var(--range-fill,20%),rgba(237,241,246,.9) var(--range-fill,20%) 100%)!important;box-shadow:inset 0 1px rgba(255,255,255,.9)!important}
+#codeAdvancedPanel .segmented-range input[type="range"]::-webkit-slider-thumb{width:36px!important;height:36px!important;margin-top:-5px!important;border-radius:50%!important;background:#fff!important;box-shadow:0 3px 10px rgba(38,47,61,.18)!important}
+#codeAdvancedPanel .range-dots{top:-3px!important;height:38px!important}.range-dots i{width:6px!important;height:6px!important}
+#code .code-input,#code .code-input:hover,#code .code-input:focus,#code .code-input:focus-visible{outline:0!important;border:0!important;background:transparent!important;box-shadow:none!important}
+#code .composer-bottom{gap:6px!important}.composer-bottom #codeAdvanced{width:auto!important;max-width:154px!important;min-width:64px!important;height:32px!important;padding:0 10px!important;border-radius:999px!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;background:rgba(255,255,255,.38)!important;font-size:12px!important;font-weight:500!important}
+#codeSend{width:34px!important;height:34px!important;font-size:16px!important;border:1px solid rgba(255,255,255,.76)!important;box-shadow:inset 0 1px rgba(255,255,255,.22)!important}
+#codeSend.runtime-control{background:#111216!important;color:#fff!important}#codeSend.idle-send{background:var(--orbit-accent)!important;color:#fff!important}
+''' + "</style>",
+    1,
+)
+
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+(function installPauseResumeComposer(){
+  const button=$('codeSend'),prompt=$('codePrompt');if(!button||!prompt)return;
+  updateCodeSendState=function(){
+    const running=codeIsRunning(currentCodeSessionData),paused=currentCodeSessionData?.status==='paused',hasText=Boolean(prompt.value.trim());
+    button.classList.toggle('runtime-control',running);button.classList.toggle('idle-send',!running);
+    button.textContent=running&&!hasText?(paused?'▶':'Ⅱ'):'↑';
+    button.title=running&&!hasText?(paused?(currentLang==='zh'?'继续运行':'Resume'):(currentLang==='zh'?'暂停运行':'Pause')):(currentLang==='zh'?'发送':'Send');
+  };
+  const priorSend=sendCodePrompt;
+  sendCodePrompt=async function(){
+    const text=prompt.value.trim(),running=codeIsRunning(currentCodeSessionData);
+    if(running&&!text){
+      try{const row=await request(`/api/code/sessions/${currentCodeSession}/pause`,{method:'POST',body:'{}'});renderCodeSession(row);startCodePoll()}catch(e){toast(e.message)}
+      return;
+    }
+    return priorSend();
+  };
+  button.onclick=sendCodePrompt;
+  prompt.placeholder=currentLang==='zh'?'今天我们构建什么？':'What are we building today?';
+  updateCodeSendState();
+})();
+const _orbitFreshCodeSession=newCodeSession;
+newCodeSession=function(){
+  _orbitFreshCodeSession();
+  $('codeTimeline').innerHTML=`<div class="code-empty"><div><b>${currentLang==='zh'?'今天我们构建什么？':'What are we building today?'}</b><span>${currentLang==='zh'?'Orbit Code 会先说明计划，再持续展示执行、发现和验证结果。':'Orbit Code will outline the plan, then show execution, discoveries, and verification as they happen.'}</span></div></div>`;
+  $('codePrompt').placeholder=currentLang==='zh'?'今天我们构建什么？':'What are we building today?';
+};
+(function installDeferredModelSwitch(){
+  const source=$('codeSource'),model=$('codeModel');if(!source||!model)return;
+  let accepted=source.value;
+  async function select(next){
+    const previous=currentCodeSessionData?.settings?.provider==='api'?`api:${currentCodeSessionData.settings.active_profile_id||''}`:`local:${currentCodeSessionData?.settings?.model||''}`;
+    if(codeIsRunning(currentCodeSessionData)&&next!==previous){
+      const ok=await actionConfirm(currentLang==='zh'?'任务正在运行。新模型会从下一条引导开始生效，更换模型可能降低连续推理性能。继续吗？':'The task is running. The new model will apply with your next guidance message and may reduce reasoning continuity. Continue?');
+      if(!ok){source.value=previous;model.value=previous;return}
+    }
+    accepted=next;source.value=next;model.value=next;
+    const short=typeof orbitShortModelName==='function'?orbitShortModelName(next):next.split(':').pop();
+    if($('codeAdvanced'))$('codeAdvanced').textContent=short||'Orbit';
+  }
+  source.onchange=()=>select(source.value);
+  model.onchange=()=>select(model.value);
+  source.addEventListener('focus',()=>{accepted=source.value});
+})();
+(function installStableConversationSurfaces(){
+  const chat=$('messages'),code=$('codeTimeline');
+  [chat,code].forEach(surface=>surface?.addEventListener('wheel',event=>{
+    if(!event.deltaY)return;
+    const before=surface.scrollTop;
+    surface.scrollTop+=event.deltaY;
+    if(surface.scrollTop!==before){event.preventDefault();event.stopPropagation()}
+    if(surface===chat&&event.deltaY<0)orbitChatFollowing=false;
+  },{capture:true,passive:false}));
+})();
+let orbitHistoryRequest=0;
+refreshWorkspaceHistory=async function(){
+  const ticket=++orbitHistoryRequest,mode=orbitWorkspaceMode,target=$('sidebarConversationList'),title=orbitSidebar.querySelector('.sidebar-history-title');if(!target||!title)return;
+  try{
+    if(mode==='orbit'){
+      title.textContent=currentLang==='zh'?'最近对话':'Recent chats';const rows=await request('/api/conversations');if(ticket!==orbitHistoryRequest||orbitWorkspaceMode!==mode)return;
+      target.innerHTML=rows.length?rows.map(r=>`<div class="history-entry"><button class="run-item ${currentConversation===r.id?'active':''}" onclick="openConversation('${eid(r.id)}')"><b>${esc(r.title)}</b><span>${esc(r.updated_at)}</span></button><button class="button danger history-delete" onclick="archiveConversation('${eid(r.id)}',event)" title="${t('archiveConversation')}">×</button></div>`).join(''):`<div class="help">${currentLang==='zh'?'还没有历史对话':'No conversation history yet'}</div>`;return
+    }
+    if(mode==='training'){
+      title.textContent=currentLang==='zh'?'训练历史':'Training history';const rows=await request('/api/training/runs');if(ticket!==orbitHistoryRequest||orbitWorkspaceMode!==mode)return;
+      target.innerHTML=rows.length?rows.map(r=>`<button class="run-item ${currentRun===r.id?'active':''}" onclick="showPage('runs');showRun('${eid(r.id)}')"><b>${esc(r.model_name||r.model_id)}</b><span>${esc(r.created_at)} · ${esc(r.status)}</span></button>`).join(''):`<div class="help">${t('noRuns')}</div>`;return
+    }
+    title.textContent=currentLang==='zh'?'Code 对话历史':'Code conversations';const rows=await request('/api/code/sessions');if(ticket!==orbitHistoryRequest||orbitWorkspaceMode!==mode)return;
+    target.innerHTML=rows.length?rows.map(r=>`<button class="run-item ${currentCodeSession===r.id?'active':''}" onclick="showPage('code');openCodeSession('${r.id}')"><span class="session-title"><b>${esc(r.title||'Orbit Code')}</b>${codeIsRunning(r)?'<i class="session-spinner" aria-label="正在运行"></i>':''}</span><span>${esc(r.status)} · ${formatCodeTime(r.duration_ms||0)}</span></button>`).join(''):`<div class="help">${currentLang==='zh'?'还没有 Orbit Code 对话。':'No Orbit Code conversations yet.'}</div>`;
+  }catch(e){if(ticket===orbitHistoryRequest)target.innerHTML=`<div class="help">${esc(e.message)}</div>`}
+};
+const _orbitTerminalRender=renderCodeSession;
+renderCodeSession=function(row){
+  const timeline=$('codeTimeline'),top=timeline?.scrollTop||0,follow=orbitNearBottom(timeline,90);
+  _orbitTerminalRender(row);
+  if(codeIsRunning(row))return;
+  const events=row.events||[],summary=[...events].reverse().find(e=>e.kind==='assistant'&&e.phase==='summary'),status=[...events].reverse().find(e=>e.phase==='summary'),full=renderThreeLevelCodeTimeline(row),finalText=summary?.detail||summary?.title||status?.detail||status?.title||(currentLang==='zh'?'任务已结束。':'Task ended.');
+  timeline.innerHTML=`<button class="code-elapsed" aria-expanded="false"><span>${currentLang==='zh'?'耗时 ':'Ran for '}${formatCodeElapsed(row.duration_ms||0)}</span><span>›</span></button><div class="code-final-summary">${codeRichText(finalText)}</div><div class="code-process-inline" hidden>${full}${codeChangeActions(row)}${codeCompletedFiles(row)}${codeInlineProgress(row)}</div>`;
+  const elapsed=timeline.querySelector('.code-elapsed'),process=timeline.querySelector('.code-process-inline');
+  elapsed.onclick=()=>{const opening=process.hidden;process.hidden=!opening;elapsed.setAttribute('aria-expanded',String(opening));elapsed.lastElementChild.textContent=opening?'⌄':'›'};
+  renderQueuedGuides();requestAnimationFrame(()=>{timeline.scrollTop=follow?timeline.scrollHeight:top});
+};
+''' + "</script></body></html>",
+    1,
+)
+
+PAGE = PAGE.replace(
+    "</style>",
+    "#chat .bubble.assistant{align-self:flex-start!important;width:100%!important;max-width:100%!important;margin-left:0!important;text-align:left!important}#chat .thinking-answer{width:100%!important;text-align:left!important}#messages,#codeTimeline{pointer-events:auto!important;-webkit-app-region:no-drag!important}#settings.page.active{height:100vh!important;min-height:0!important;overflow:hidden!important}.settings-workspace{height:100vh!important;max-height:100vh!important;min-height:0!important;overflow:hidden!important}.settings-directory{height:100%!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain!important;-webkit-app-region:no-drag!important}.settings-main{height:100%!important;min-height:0!important;overflow-x:hidden!important;overflow-y:scroll!important;overscroll-behavior:contain!important;scrollbar-gutter:stable!important;-webkit-app-region:no-drag!important}</style>",
+    1,
+)
+
+# User messages stay visually light, but expose a small copy affordance on
+# hover/focus instead of turning every message into a separate card.
+PAGE = PAGE.replace(
+    "</style>",
+    ".bubble.user{position:relative!important}.message-copy{position:absolute;right:8px;bottom:-25px;z-index:2;opacity:0;pointer-events:none;padding:2px 6px;border:0;border-radius:7px;background:rgba(255,255,255,.74);color:#697386;font-size:11px;cursor:pointer;transition:opacity .16s ease}.bubble.user:hover .message-copy,.bubble.user:focus-within .message-copy{opacity:1;pointer-events:auto}.message-copy:hover{background:rgba(255,255,255,.96);color:#20242b}</style>",
+    1,
+)
+
+# Final pointer binding: native range controls in a frameless WebView can
+# receive the click but lose the drag when an ancestor is a window drag area.
+# Keep the native control, but update its value from the captured pointer so
+# mouse, trackpad and touch all move continuously between the labelled stops.
+PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
+<script>
+(()=>{
+  const bind=slider=>{
+    if(!slider||slider.dataset.orbitDragFinal==='1')return;
+    slider.dataset.orbitDragFinal='1';
+    let active=false;
+    const setValue=event=>{
+      const rect=slider.getBoundingClientRect(),min=Number(slider.min||0),max=Number(slider.max||100),step=Number(slider.step||1);
+      const x=event.clientX==null?(event.touches?.[0]?.clientX||rect.left):event.clientX;
+      const ratio=Math.max(0,Math.min(1,(x-rect.left)/Math.max(1,rect.width))),raw=min+ratio*(max-min),value=Math.max(min,Math.min(max,Math.round(raw/step)*step));
+      if(Number(slider.value)!==value){slider.value=String(value);slider.dispatchEvent(new Event('input',{bubbles:true}))}
+    };
+    const move=event=>{if(!active)return;event.preventDefault();event.stopPropagation();setValue(event)};
+    const finish=event=>{if(!active)return;active=false;window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',finish,true);window.removeEventListener('pointercancel',finish,true);slider.dispatchEvent(new Event('change',{bubbles:true}))};
+    slider.addEventListener('pointerdown',event=>{active=true;event.preventDefault();event.stopPropagation();setValue(event);slider.setPointerCapture?.(event.pointerId);window.addEventListener('pointermove',move,true);window.addEventListener('pointerup',finish,true);window.addEventListener('pointercancel',finish,true)},{capture:true});
+  };
+  document.querySelectorAll('input[type="range"]').forEach(bind);
+})();
+</script></body></html>'''
+
+# Last interaction guardrails.  Several older compatibility layers still
+# render the same timeline before the current compact renderer runs.  Keep
+# the user's scroll anchor across both running polls and the completed
+# summary, and make the settings content the only vertical scroll surface.
+PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
+<style>
+/* Settings is a two-pane workspace: the directory and content scroll
+   independently, while the surrounding app never captures their wheel. */
+#settings.page.active .settings-workspace{display:grid!important;grid-template-rows:minmax(0,1fr)!important;align-items:stretch!important}
+#settings.page.active .settings-main{display:block!important;min-height:0!important;height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;padding-bottom:96px!important}
+#settings.page.active .settings-main>.panel{height:max-content!important;min-height:100%!important;overflow:visible!important}
+#settings.page.active .settings-main>.panel>.panel-pad{height:auto!important;min-height:0!important;overflow:visible!important}
+#settings.page.active .settings-directory{height:100%!important;overflow-y:auto!important;overscroll-behavior:contain!important}
+</style>
+<script>
+(()=>{
+  const install=()=>{
+    let add=document.getElementById('newCodeFromApi');
+    if(!add){
+      const head=document.querySelector('#codeApi .model-settings-head');
+      if(head){
+        const actions=head.querySelector('.actions')||document.createElement('div');
+        actions.className='actions';
+        if(!actions.parentNode)head.appendChild(actions);
+        add=document.createElement('button');add.id='newCodeFromApi';add.type='button';add.className='button';add.textContent='＋ 新对话';
+        actions.insertBefore(add,actions.firstChild||null);
+      }
+    }
+    if(add&&!add.dataset.bound){add.dataset.bound='1';add.onclick=()=>{showPage('code');setOrbitWorkspaceMode('code');newCodeSession()}}
+  };
+  install();
+  const oldRender=renderCodeSession;
+  renderCodeSession=function(row){
+    const surface=document.getElementById('codeTimeline');
+    const top=surface?.scrollTop||0,follow=!surface||orbitNearBottom(surface,96);
+    oldRender(row);
+    requestAnimationFrame(()=>{
+      if(!surface)return;
+      surface.scrollTop=follow?surface.scrollHeight:Math.min(top,Math.max(0,surface.scrollHeight-surface.clientHeight));
+      renderTurnRuler();
+    });
+  };
+  window.addEventListener('resize',install,{passive:true});
+})();
+</script></body></html>'''
+
+# Keep continuous dragging responsive without issuing a network write for
+# every pointer event. The latest value is persisted once the drag settles.
+PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
+<script>
+(()=>{
+  let timer=0;
+  const schedule=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(typeof persistCodeControls==='function')persistCodeControls()},180)};
+  const reasoning=document.getElementById('codeReasoning'),capability=document.getElementById('codeCapability');
+  if(reasoning)reasoning.oninput=()=>{syncCodeSliders();schedule()};
+  if(capability)capability.oninput=()=>{syncCodeSliders();schedule()};
+})();
+</script></body></html>'''
