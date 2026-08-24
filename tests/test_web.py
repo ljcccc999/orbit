@@ -30,6 +30,16 @@ def test_training_page_preserves_a_manually_entered_sample_count():
     assert "最终计算结果" in PAGE
 
 
+def test_fullscreen_code_turn_ruler_centers_transcript_and_previews_full_turn():
+    assert "body.orbit-window-maximized #code #codeTimeline" in PAGE
+    assert "calc((100% - 900px)/2)" in PAGE
+    assert "const ruler=document.getElementById('orbitTurnRuler')" in PAGE
+    assert "data-code-user-prompt" in PAGE
+    assert "你：${question}" in PAGE
+    assert "Orbit：${answer}" in PAGE
+    assert "white-space:pre-wrap!important" in PAGE
+
+
 def test_reset_form_balanced_recommendation_is_coupled_to_recommended_samples(tmp_path):
     runtime = OrbitRuntime(tmp_path)
     recommendation = runtime.training_recommendation({

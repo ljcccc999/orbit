@@ -1777,7 +1777,7 @@ const _orbitScrollableOpenConversation=openConversation;
 openConversation=async function(encoded){orbitChatFollowing=true;const result=await _orbitScrollableOpenConversation(encoded);orbitRestoreScroll(orbitMessages,0,true);renderTurnRuler();return result};
 
 const orbitTurnRuler=document.createElement('nav');orbitTurnRuler.id='orbitTurnRuler';orbitTurnRuler.className='turn-ruler';orbitTurnRuler.setAttribute('aria-label','本轮对话导航');document.body.appendChild(orbitTurnRuler);
-function orbitWindowIsMaximized(){return window.innerWidth>=1280&&(window.outerWidth>=screen.availWidth-36||window.innerWidth>=screen.availWidth-60)}
+function orbitWindowIsMaximized(){return Boolean(document.fullscreenElement)||(window.innerWidth>=1280&&(window.outerWidth>=screen.availWidth-36||window.innerWidth>=screen.availWidth-60))}
 function orbitTurnTargets(){
   if($('code')?.classList.contains('active'))return [...$('codeTimeline').querySelectorAll('.code-elapsed')].filter(node=>node.offsetParent);
   if($('chat')?.classList.contains('active'))return [...orbitMessages.querySelectorAll('.bubble.user')].filter(node=>node.offsetParent);
@@ -2170,6 +2170,145 @@ PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
     slider.addEventListener('pointerdown',event=>{active=true;event.preventDefault();event.stopPropagation();setValue(event);slider.setPointerCapture?.(event.pointerId);window.addEventListener('pointermove',move,true);window.addEventListener('pointerup',finish,true);window.addEventListener('pointercancel',finish,true)},{capture:true});
   };
   document.querySelectorAll('input[type="range"]').forEach(bind);
+})();
+</script></body></html>'''
+
+# Full-screen conversation polish.  The maximized view keeps the transcript in
+# a calm reading column while the left-stage ruler remains anchored to that
+# column.  Hovering a tick reveals the complete question/answer turn; it is a
+# scrollable glass preview rather than a lossy one-line tooltip.
+PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
+<style>
+body.orbit-window-maximized #chat #messages{
+  padding-left:max(48px,calc((100% - 900px)/2))!important;
+  padding-right:max(48px,calc((100% - 900px)/2))!important;
+}
+body.orbit-window-maximized #code #codeTimeline{
+  padding-left:max(48px,calc((100% - 900px)/2))!important;
+  padding-right:max(48px,calc((100% - 900px)/2))!important;
+}
+body.orbit-window-maximized .turn-ruler{
+  left:max(258px,calc((100vw - 900px)/2 - 30px))!important;
+  width:24px!important;
+  max-height:68vh!important;
+  gap:7px!important;
+}
+.turn-ruler button{
+  width:8px!important;
+  height:3px!important;
+  min-height:3px!important;
+  border-radius:3px!important;
+  background:rgba(79,87,99,.25)!important;
+  transition:width .16s ease,background .16s ease,opacity .16s ease!important;
+}
+.turn-ruler button:nth-child(3n){width:11px!important}
+.turn-ruler button:hover,.turn-ruler button.active{
+  width:23px!important;
+  background:#3f4650!important;
+}
+.turn-ruler-preview{
+  left:31px!important;
+  width:min(420px,calc(100vw - 330px))!important;
+  max-height:min(300px,48vh)!important;
+  padding:13px 15px!important;
+  border-radius:15px!important;
+  background:rgba(248,249,252,.92)!important;
+  backdrop-filter:blur(34px) saturate(175%)!important;
+  -webkit-backdrop-filter:blur(34px) saturate(175%)!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.9),0 16px 38px rgba(31,38,50,.14)!important;
+  color:#303640!important;
+  font-size:13px!important;
+  line-height:1.55!important;
+  white-space:pre-wrap!important;
+  overflow:auto!important;
+  pointer-events:none!important;
+}
+@media(prefers-reduced-motion:reduce){
+  .turn-ruler button{transition:none!important}
+}
+@media(max-width:1279px){
+  body.orbit-window-maximized .turn-ruler.has-turns{display:flex!important;flex-direction:column!important;align-items:flex-start!important}
+}
+</style>
+<script>
+(()=>{
+  const ruler=document.getElementById('orbitTurnRuler');
+  if(!ruler)return;
+  const originalTargets=window.orbitTurnTargets;
+  const originalSurface=window.orbitTurnSurface;
+  window.orbitTurnTargets=function(){
+    const code=document.getElementById('code'),chat=document.getElementById('chat');
+    if(code?.classList.contains('active')){
+      return [...(document.getElementById('codeTimeline')?.querySelectorAll('.code-elapsed')||[])].filter(node=>node.offsetParent);
+    }
+    if(chat?.classList.contains('active')){
+      return [...(document.getElementById('messages')?.querySelectorAll('.bubble.user')||[])].filter(node=>node.offsetParent);
+    }
+    return originalTargets?originalTargets():[];
+  };
+  window.orbitTurnSurface=function(){return originalSurface?originalSurface():document.getElementById('messages')};
+  window.orbitTurnPreview=function(node){
+    const clean=value=>String(value||'').replace(/\s+/g,' ').trim();
+    let question='',answer='';
+    if(node?.matches?.('.bubble.user')){
+      question=clean(node.innerText||node.textContent);
+      let next=node.nextElementSibling;
+      while(next&&!next.matches('.bubble.user')){answer+=' '+String(next.innerText||next.textContent||'');next=next.nextElementSibling}
+    }else if(node?.matches?.('.code-elapsed')){
+      const timeline=node.closest('#codeTimeline');
+      const prompt=timeline?.querySelector('[data-code-user-prompt]');
+      const summary=timeline?.querySelector('.code-final-summary');
+      question=clean(prompt?.innerText||prompt?.textContent);
+      answer=clean(summary?.innerText||summary?.textContent);
+      if(!answer){
+        const next=node.nextElementSibling;
+        answer=clean(next?.innerText||next?.textContent);
+      }
+    }
+    const parts=[];
+    if(question)parts.push(`你：${question}`);
+    if(answer)parts.push(`Orbit：${answer}`);
+    return parts.join('\n\n')||clean(node?.innerText||node?.textContent);
+  };
+  const render=window.renderTurnRuler;
+  window.renderTurnRuler=function(){
+    if(typeof render==='function')render();
+    const buttons=[...ruler.querySelectorAll('button')];
+    buttons.forEach((button,index)=>{
+      button.setAttribute('aria-label',`第 ${index+1} 个阶段`);
+      button.onmouseenter=()=>{
+        ruler.querySelector('.turn-ruler-preview')?.remove();
+        const target=window.orbitTurnTargets()?.[index];
+        if(!target)return;
+        const preview=document.createElement('div');
+        preview.className='turn-ruler-preview';
+        preview.textContent=window.orbitTurnPreview(target);
+        ruler.appendChild(preview);
+        const maxTop=Math.max(0,ruler.clientHeight-preview.offsetHeight);
+        preview.style.top=Math.max(-8,Math.min(button.offsetTop-20,maxTop))+'px';
+      };
+      button.onmouseleave=()=>ruler.querySelector('.turn-ruler-preview')?.remove();
+    });
+  };
+  const session=window.renderCodeSession;
+  window.renderCodeSession=function(row){
+    const result=typeof session==='function'?session(row):undefined;
+    requestAnimationFrame(()=>{
+      const timeline=document.getElementById('codeTimeline');
+      if(timeline&&row?.prompt&&!timeline.querySelector('[data-code-user-prompt]')){
+        const prompt=document.createElement('div');
+        prompt.className='code-user-prompt';prompt.dataset.codeUserPrompt='1';
+        const body=document.createElement('div');body.className='code-user-prompt-body';
+        const label=document.createElement('span');label.className='code-user-prompt-label';label.textContent=currentLang==='zh'?'你':'You';
+        const text=document.createElement('span');text.textContent=String(row.prompt);
+        body.append(label,text);prompt.appendChild(body);timeline.prepend(prompt);
+      }
+      window.renderTurnRuler();
+    });
+    return result;
+  };
+  window.addEventListener('resize',()=>requestAnimationFrame(window.renderTurnRuler),{passive:true});
+  requestAnimationFrame(window.renderTurnRuler);
 })();
 </script></body></html>'''
 
