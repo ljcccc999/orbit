@@ -2173,6 +2173,57 @@ PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
 })();
 </script></body></html>'''
 
+# Keep the original Code request in the conversation stream.  The runtime
+# already persists it as ``row.prompt``; older renderers only displayed tool
+# events, which made a reopened task look as if the user's question had been
+# lost and made scrolling to the beginning impossible.
+PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
+<style>
+/* Code is a conversation, not a stack of cards.  The only raised surfaces
+   remain the composer and third-level file/diff previews. */
+#code .code-timeline{scroll-behavior:auto!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain!important;-webkit-app-region:no-drag!important}
+#code .code-user-prompt{display:flex!important;justify-content:flex-end!important;width:100%!important;margin:0 0 22px!important;padding:0!important;-webkit-user-select:text!important}
+#code .code-user-prompt .code-user-prompt-body{max-width:min(86%,980px)!important;padding:11px 15px!important;border:1px solid rgba(255,255,255,.82)!important;border-radius:18px 18px 6px 18px!important;background:linear-gradient(145deg,rgba(240,243,248,.9),rgba(218,225,235,.72))!important;backdrop-filter:blur(26px) saturate(150%)!important;-webkit-backdrop-filter:blur(26px) saturate(150%)!important;color:var(--ink)!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important;line-height:1.62!important;box-shadow:inset 0 1px rgba(255,255,255,.9)!important}
+#code .code-user-prompt .code-user-prompt-label{display:block!important;margin:0 0 4px!important;color:var(--muted)!important;font-size:11px!important;font-weight:600!important}
+#code .code-process-inline .event-card,#code .code-process-inline .guidance-card,#code .code-process-inline .approval-box,#code .code-process-inline .tool-run-group,#code .code-process-inline .tool-run-row{border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important}
+#code .code-process-inline .tool-run-output{border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;padding:5px 0 10px 27px!important;margin:0!important}
+#code .code-process-inline .event-detail{max-width:none!important;width:100%!important}
+#code .agent-event.assistant{width:100%!important;max-width:none!important;margin-left:0!important;padding-left:27px!important}
+#code .code-final-summary,#code .code-stage-message,#code .code-stage{width:100%!important;max-width:none!important;margin-left:0!important;margin-right:0!important}
+#code .code-timeline{max-width:none!important;margin-left:0!important;margin-right:0!important;padding-left:18px!important;padding-right:18px!important}
+</style>
+<script>
+(()=>{
+  const renderPrompt=row=>{
+    const prompt=String(row?.prompt||'');
+    if(!prompt)return '';
+    return `<div class="code-user-prompt" data-code-user-prompt="1"><div class="code-user-prompt-body"><span class="code-user-prompt-label">${currentLang==='zh'?'你':'You'}</span><span>${esc(prompt)}</span></div></div>`;
+  };
+  const insertPrompt=row=>{
+    const timeline=document.getElementById('codeTimeline');
+    if(!timeline||!row?.prompt)return;
+    const existing=timeline.querySelector('[data-code-user-prompt]');
+    if(existing)existing.remove();
+    timeline.insertAdjacentHTML('afterbegin',renderPrompt(row));
+  };
+  const prior=renderCodeSession;
+  renderCodeSession=function(row){
+    const timeline=document.getElementById('codeTimeline');
+    const before=timeline?.scrollTop||0;
+    const nearBottom=!timeline||timeline.scrollHeight-timeline.scrollTop-timeline.clientHeight<96;
+    prior(row);
+    insertPrompt(row);
+    if(!timeline)return;
+    requestAnimationFrame(()=>{
+      /* A newly opened session follows the latest event; a user who has
+         scrolled upward keeps the exact anchor instead of being teleported
+         back to the bottom on every 650 ms poll. */
+      timeline.scrollTop=nearBottom?timeline.scrollHeight:Math.min(before,Math.max(0,timeline.scrollHeight-timeline.clientHeight));
+    });
+  };
+})();
+</script></body></html>'''
+
 # The generated page has accumulated compatibility layers over several
 # releases.  Some of those layers replace the same navigation function more
 # than once; on macOS a click from the sidebar could therefore re-enter the

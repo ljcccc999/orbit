@@ -309,6 +309,20 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert '#codeApi.page.active{height:100%;min-height:0;overflow:hidden' in PAGE
 
 
+def test_orbit_code_keeps_original_user_prompt_in_timeline():
+    # Code sessions persist the initial request separately from execution
+    # events. The UI must render that field as the first, scrollable message;
+    # otherwise a reopened session contains only the agent's tool trace.
+    assert "row?.prompt" in PAGE
+    assert 'data-code-user-prompt="1"' in PAGE
+    assert "timeline.insertAdjacentHTML('afterbegin',renderPrompt(row))" in PAGE
+    assert '#code .code-user-prompt{display:flex!important;justify-content:flex-end!important' in PAGE
+    assert '#code .agent-event.assistant{width:100%!important;max-width:none!important' in PAGE
+    assert '#code .code-process-inline .event-card' in PAGE
+    assert '#code .code-final-summary,#code .code-stage-message,#code .code-stage{width:100%!important;max-width:none!important' in PAGE
+    assert '#code .code-timeline{max-width:none!important;margin-left:0!important;margin-right:0!important' in PAGE
+
+
 def test_local_model_display_name_can_be_edited_without_renaming_checkpoint(tmp_path):
     runtime = OrbitRuntime(tmp_path)
     checkpoint = runtime.models_root / "stable-id.pt"
