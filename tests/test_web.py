@@ -198,7 +198,8 @@ def test_desktop_workspace_keeps_training_page_scrollable():
     assert 'id="loadActiveModel"' in PAGE
     assert 'id="chatModel"' in PAGE
     assert "thinking-bubble" in PAGE
-    assert 'autocomplete="new-password"' in PAGE
+    assert 'autocomplete="new-password"' not in PAGE
+    assert 'id="teacherKey" type="password" autocomplete="off" data-paste-enabled="true"' in PAGE
     assert 'data-page="settings"' in PAGE
     assert 'id="settingsUpdateNow"' in PAGE
     assert "/api/conversations/archive" in PAGE
