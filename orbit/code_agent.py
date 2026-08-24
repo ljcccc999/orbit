@@ -403,7 +403,7 @@ class OrbitCodeAgent:
             "pending_approval": None,
             "directives": [],
         }
-        baseline = self._snapshot_workspace(workspace)
+        baseline = None  # computed inside the worker thread so start() returns immediately
         stop = threading.Event()
         worker = threading.Thread(target=self._run, args=(row, settings, stop, baseline), name=f"orbit-code-{session_id[:8]}", daemon=True)
         with self._lock:
@@ -527,11 +527,13 @@ class OrbitCodeAgent:
             self._save(row)
         return self.get(session_id)
 
-    def _run(self, row: dict[str, Any], settings: dict[str, Any], stop: threading.Event, baseline: dict[str, bytes]) -> None:
+    def _run(self, row: dict[str, Any], settings: dict[str, Any], stop: threading.Event, baseline: dict[str, bytes] | None) -> None:
         started = time.monotonic()
         try:
             self._event(row, "status", title="正在理解任务", detail="Orbit Code 正在检查目标、工作区和可用能力。", phase="plan")
             workspace = Path(str(settings["workspace"])).resolve()
+            if baseline is None:
+                baseline = self._snapshot_workspace(workspace)
             context = self._workspace_context(workspace) if settings.get("local_context", True) else "本地上下文：已关闭"
             memory = self._long_term_context(workspace) if settings.get("long_term_memory", True) else "长期记忆：已关闭"
             plugins = self._plugin_context()
@@ -710,9 +712,14 @@ class OrbitCodeAgent:
     def _snapshot_workspace(workspace: Path) -> dict[str, bytes]:
         snapshot: dict[str, bytes] = {}
         ignored = {".git", ".venv", "node_modules", "dist", "build", "__pycache__", ".pytest_cache"}
+        # Never walk system trees when the workspace is the filesystem root.
+        system_roots = {"/System", "/private", "/Library", "/Applications", "/usr", "/opt", "/Volumes", "/cores", "/dev", "/sbin", "/bin", "/etc", "/var", "/tmp", "/Network", "/home", "/nix", "/snap"}
         total = 0
+        count = 0
         for root, dirs, files in os.walk(workspace):
             dirs[:] = [name for name in dirs if name not in ignored]
+            if str(workspace) == "/":
+                dirs[:] = [name for name in dirs if str(Path(workspace) / name) not in system_roots]
             for name in files:
                 path = Path(root) / name
                 try:
@@ -724,6 +731,9 @@ class OrbitCodeAgent:
                     continue
                 snapshot[str(path.relative_to(workspace))] = data
                 total += len(data)
+                count += 1
+                if count >= 20_000:
+                    return snapshot
         return snapshot
 
     @staticmethod
