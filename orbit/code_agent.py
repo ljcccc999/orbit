@@ -652,6 +652,21 @@ class OrbitCodeAgent:
                         detail=f"{before} → {after}；从这条引导之后使用新模型。",
                         phase="update",
                     )
+            # A live guidance message is itself a turn in the conversation.
+            # Put the short acknowledgement in the timeline before the
+            # directive marker so the user sees Orbit answer the guidance
+            # first, then sees it resume the interrupted plan.
+            self._event(
+                row,
+                "assistant",
+                title="先回答引导",
+                detail=(
+                    f"收到你的引导：“{prompt}”。Orbit 会先回答这一点，"
+                    "再从安全边界继续原任务。"
+                ),
+                phase="guidance_reply",
+                directive_id=directive_id,
+            )
             self._event(
                 row,
                 "guidance",

@@ -201,6 +201,21 @@ def test_code_pause_and_resume_use_the_same_safe_run_gate(tmp_path):
     assert resumed["events"][-1]["title"] == "已继续运行"
 
 
+def test_live_guidance_answers_before_queue_marker(tmp_path):
+    agent = _agent(tmp_path / "code")
+    session_id = "a" * 24
+    row = {"id": session_id, "status": "running", "events": [], "updated_at": "", "settings": {}}
+    agent._sessions[session_id] = row
+    agent._save(row)
+
+    result = agent.guide(session_id, "请先说明当前发现", "steer")
+    events = result["events"]
+    assert [event["kind"] for event in events[-2:]] == ["assistant", "guidance"]
+    assert events[-2]["phase"] == "guidance_reply"
+    assert "先回答" in events[-2]["title"]
+    assert events[-1]["mode"] == "steer"
+
+
 def test_revert_changes_restores_only_the_archived_session_state(tmp_path):
     workspace = tmp_path / "project"
     workspace.mkdir()

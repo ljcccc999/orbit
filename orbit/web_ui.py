@@ -2173,6 +2173,72 @@ PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
 })();
 </script></body></html>'''
 
+# The generated page has accumulated compatibility layers over several
+# releases.  Some of those layers replace the same navigation function more
+# than once; on macOS a click from the sidebar could therefore re-enter the
+# wrapper chain until WebKit reported "Maximum call stack size exceeded".
+# Keep New chat on a small, direct path that never calls the wrapped
+# showPage/newConversation functions.  This also makes the action work after
+# switching through Plugins, API & models, or Settings.
+PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
+<script>
+(()=>{
+  const text=(zh,en)=>currentLang==='zh'?zh:en;
+  const safeToast=message=>{
+    try{if(typeof toast==='function'&&!/Maximum call stack/i.test(String(message)))toast(String(message));}
+    catch(error){console.error('[Orbit] UI action failed',error)}
+  };
+  const setPageDirect=name=>{
+    document.querySelectorAll('.page').forEach(node=>node.classList.toggle('active',node.id===name));
+    document.querySelectorAll('.nav button').forEach(node=>node.classList.toggle('active',node.dataset.page===name));
+    const trail=document.getElementById('trail'),title=document.getElementById('pageTitle');
+    if(name==='chat'){if(trail)trail.textContent='Chat';if(title)title.textContent=text('对话','Chat')}
+    history.replaceState(null,'',`#${name}`);
+  };
+  const renderOrbitHistoryDirect=async()=>{
+    const rows=await request('/api/conversations');
+    const html=rows.length?rows.map(row=>`<div class="history-entry"><button class="run-item ${currentConversation===row.id?'active':''}" onclick="openConversation('${eid(row.id)}')"><b>${esc(row.title)}</b><span>${esc(row.updated_at)}</span></button><button class="button danger history-delete" onclick="archiveConversation('${eid(row.id)}',event)" title="${text('归档对话','Archive conversation')}">×</button></div>`).join(''):`<div class="help">${text('还没有历史对话','No conversation history yet')}</div>`;
+    const sidebar=document.getElementById('sidebarConversationList');
+    const inspector=document.getElementById('conversationList');
+    if(sidebar)sidebar.innerHTML=html;
+    if(inspector)inspector.innerHTML=html;
+  };
+  const createOrbitConversationDirect=async()=>{
+    const row=await request('/api/conversations',{method:'POST',body:'{}'});
+    currentConversation=row.id;
+    const messages=document.getElementById('messages');
+    if(messages)messages.innerHTML=identityCard();
+    const prompt=document.getElementById('prompt');
+    if(prompt){prompt.value='';prompt.focus()}
+    document.getElementById('askIdentity')?.addEventListener('click',()=>sendPrompt(t('identityAnswer')),{once:true});
+    await renderOrbitHistoryDirect();
+  };
+  const createCodeConversationDirect=()=>{
+    setPageDirect('code');
+    if(typeof newCodeSession==='function')newCodeSession();
+  };
+  const createTrainingDirect=()=>{
+    setPageDirect('train');
+    if(typeof resetTrainingForm==='function')resetTrainingForm();
+    document.getElementById('modelName')?.focus();
+  };
+  const handleNewAction=event=>{
+    const target=event.target?.closest?.('#newChat,#newCodeFromApi,[data-side-action="new"],.sidebar .nav button[data-page="chat"]');
+    if(!target)return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const mode=target.id==='newCodeFromApi'?'code':String(typeof orbitWorkspaceMode==='string'?orbitWorkspaceMode:'orbit');
+    if(mode==='code'){createCodeConversationDirect();return}
+    if(mode==='training'){createTrainingDirect();return}
+    setPageDirect('chat');
+    createOrbitConversationDirect().catch(error=>safeToast(error.message||error));
+  };
+  // Document capture runs before the older sidebar capture handlers.
+  document.addEventListener('click',handleNewAction,true);
+  window.orbitCreateConversationDirect=createOrbitConversationDirect;
+})();
+</script></body></html>'''
+
 # Last interaction guardrails.  Several older compatibility layers still
 # render the same timeline before the current compact renderer runs.  Keep
 # the user's scroll anchor across both running polls and the completed
@@ -2201,7 +2267,7 @@ PAGE = PAGE.rsplit("</body></html>", 1)[0] + r'''
         actions.insertBefore(add,actions.firstChild||null);
       }
     }
-    if(add&&!add.dataset.bound){add.dataset.bound='1';add.onclick=()=>{showPage('code');setOrbitWorkspaceMode('code');newCodeSession()}}
+    if(add&&!add.dataset.bound){add.dataset.bound='1';add.onclick=event=>{event.preventDefault();event.stopPropagation();setPageDirect('code');setOrbitWorkspaceMode?.('code');newCodeSession?.()}}
   };
   install();
   const oldRender=renderCodeSession;
