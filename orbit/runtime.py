@@ -2354,7 +2354,7 @@ class OrbitRuntime:
             raise ValueError("消息不能为空")
         if not 1 <= max_tokens <= 2048:
             raise ValueError("max_tokens 必须在 1 到 2048 之间")
-        memory_context = self.memory.system_context()
+        memory_context = self.memory.system_context() if self.settings.get().get("memory_enabled", True) else ""
         if model_id:
             self.load_model(model_id)
         elif self.active_model_id is None:

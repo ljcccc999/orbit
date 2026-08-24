@@ -13,6 +13,8 @@ class OrbitSettings:
         "prevent_sleep": False,
         "background_service": True,
         "computer_control": False,
+        "memory_enabled": True,
+        "memory_auto": True,
     }
 
     def __init__(self, data_root: Path):

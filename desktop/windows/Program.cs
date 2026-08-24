@@ -37,7 +37,7 @@ internal static class Program
 
         public OrbitForm(EventWaitHandle showEvent)
         {
-            Text = "Orbit"; Width = 1280; Height = 820; MinimumSize = new Size(980, 640); StartPosition = FormStartPosition.CenterScreen;
+            Text = "Orbit"; Width = 1000; Height = 700; MinimumSize = new Size(820, 560); StartPosition = FormStartPosition.CenterScreen;
             Controls.Add(web); Controls.Add(status);
             var appIcon = LoadOrbitIcon("OrbitDesktop.orbit-logo.png");
             var trayIcon = LoadOrbitIcon("OrbitDesktop.orbit-logo-transparent.png");

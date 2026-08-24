@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import threading
@@ -23,7 +24,11 @@ _RUNNING = {"planning", "running", "waiting_approval"}
 _WRITE_TOOLS = {"apply_patch", "shell"}
 _SAFE_COMMAND = re.compile(r"^[A-Za-z0-9_./:@%+=,\-\s'\"|&()\[\]{}*?!<>;$`\\]+$")
 _BLOCKED_SHELL = re.compile(
-    r"(^|\s)(sudo\s+|su\s|rm\s+-[^\n]*r|mkfs|diskutil\s+erase|dd\s+if=|shutdown|reboot|halt|poweroff|kill\s+-9\s+1)(\s|$)",
+    r"(^|\s)(sudo\s+|su\s|rm\s+(?:-[A-Za-z]*r[A-Za-z]*|--recursive)(?=\s|$)|mkfs|diskutil\s+erase|dd\s+if=|shutdown|reboot|halt|poweroff|kill\s+-9\s+1)(\s|$)",
+    re.IGNORECASE,
+)
+_NETWORK_SHELL = re.compile(
+    r"(^|[;&|]\s*)(curl|wget|ssh|scp|sftp|git\s+(clone|fetch|pull|push)|pip(?:3)?\s+install|npm\s+(install|publish)|pnpm\s+(install|publish)|yarn\s+(add|install|publish)|brew\s+(install|update|upgrade))\b",
     re.IGNORECASE,
 )
 
@@ -82,6 +87,7 @@ class OrbitCodeAgent:
             "speed": "balanced",
             "permission": "ask",
             "workspace": str(self.workspace_root),
+            "workspace_auto": True,
             "capability": "3",
             "active_profile_id": "",
             "profiles": [],
@@ -141,7 +147,7 @@ class OrbitCodeAgent:
         for key in ("provider", "base_url", "model", "api_format", "reasoning", "speed", "permission", "workspace", "capability", "active_profile_id"):
             if key in payload:
                 values[key] = str(payload[key]).strip()
-        for key in ("local_context", "long_term_memory", "computer_control"):
+        for key in ("local_context", "long_term_memory", "computer_control", "workspace_auto"):
             if key in payload:
                 values[key] = bool(payload[key])
         if isinstance(payload.get("profile_order"), list):
@@ -162,7 +168,7 @@ class OrbitCodeAgent:
             values["api_key"] = str(payload["api_key"]).strip()
         if values["provider"] not in {"local", "api"}:
             raise ValueError("Orbit Code 只支持本地 Orbit、主流 API 或 OpenAI 兼容 API")
-        if values["reasoning"] not in {"none", "low", "medium", "high", "xhigh", "max"}:
+        if values["reasoning"] not in {"low", "medium", "high", "xhigh", "max", "ultra"}:
             raise ValueError("不支持的智能等级")
         if values.get("api_format", "openai") not in {"openai", "anthropic"}:
             raise ValueError("不支持的 API 格式")
@@ -172,7 +178,7 @@ class OrbitCodeAgent:
             raise ValueError("不支持的权限模式")
         if str(values["capability"]) not in {"1", "2", "3", "4", "5"}:
             raise ValueError("能力等级必须在 1 到 5 之间")
-        workspace = Path(values["workspace"] or os.getcwd()).expanduser().resolve()
+        workspace = Path(values["workspace"] or self.workspace_root).expanduser().resolve()
         if not workspace.is_dir():
             raise ValueError("Orbit Code 工作区不存在")
         values["workspace"] = str(workspace)
@@ -422,7 +428,7 @@ class OrbitCodeAgent:
         for key in ("provider", "model", "reasoning", "speed", "permission", "workspace"):
             if key in payload and str(payload[key]).strip():
                 settings[key] = str(payload[key]).strip()
-        for key in ("local_context", "long_term_memory", "computer_control"):
+        for key in ("local_context", "long_term_memory", "computer_control", "workspace_auto"):
             if key in payload:
                 settings[key] = bool(payload[key])
         if "capability" in payload:
@@ -432,11 +438,13 @@ class OrbitCodeAgent:
             profile = next((item for item in settings.get("profiles", []) if item.get("id") == profile_id), None)
             if profile:
                 settings.update(base_url=profile["base_url"], model=profile["model"], api_key=profile["api_key"], api_format=profile.get("api_format", "openai"), active_profile_id=profile_id)
-        workspace = Path(settings.get("workspace") or os.getcwd()).expanduser().resolve()
+        session_id = secrets.token_hex(12)
+        workspace_auto = bool(payload.get("workspace_auto", settings.get("workspace_auto", True)))
+        workspace = self.workspace_root if workspace_auto else Path(settings.get("workspace") or self.workspace_root).expanduser().resolve()
+        settings["workspace_auto"] = workspace_auto
         if not workspace.is_dir():
             raise ValueError("Orbit Code 工作区不存在")
         settings["workspace"] = str(workspace)
-        session_id = secrets.token_hex(12)
         now = _stamp()
         row: dict[str, Any] = {
             "id": session_id,
@@ -448,7 +456,7 @@ class OrbitCodeAgent:
             "duration_ms": 0,
             "progress": {"completed": 0, "total": 0},
             "changes": {"files": [], "files_changed": 0, "additions": 0, "deletions": 0},
-            "settings": {key: settings.get(key) for key in ("provider", "model", "reasoning", "speed", "permission", "workspace", "capability", "active_profile_id", "api_format", "local_context", "long_term_memory", "computer_control")},
+            "settings": {key: settings.get(key) for key in ("provider", "model", "reasoning", "speed", "permission", "workspace", "workspace_auto", "capability", "active_profile_id", "api_format", "local_context", "long_term_memory", "computer_control")},
             "attachments": self._save_attachments(session_id, payload.get("attachments", [])),
             "events": [],
             "history": [],
@@ -978,12 +986,15 @@ JSON 规则：phase 只能是 plan、update 或 summary；message 是直接给�
     def _intelligence_profile(settings: dict[str, Any]) -> dict[str, Any]:
         level = str(settings.get("reasoning", "medium"))
         profiles = {
-            "none": (0, "即时", 4, 3, 640, "只做必要定位和一次关键验证，优先速度与低 token。"),
-            "low": (1, "轻量", 7, 4, 900, "做针对性搜索、实现和关键验证，控制执行范围。"),
-            "medium": (2, "标准", 12, 6, 1400, "检查相关代码，完成实现并运行必要测试。"),
-            "high": (3, "深入", 18, 8, 2100, "扩大相关代码搜索，检查相邻影响，并用测试验证修改。"),
-            "xhigh": (4, "全面", 24, 8, 3000, "进行更全面的代码与资料搜索、边界检查和多项验证；允许更长时间和更多 token。"),
-            "max": (5, "最大", 32, 8, 4000, "在不重复工作的前提下进行最充分的定位、交叉检查、测试和结果复核；耗时与 token 最高。"),
+            # Legacy settings may still contain `none`; treat it as the new Low
+            # tier instead of silently increasing its execution budget.
+            "none": (0, "低", 5, 3, 700, "只做必要定位、执行和一次关键验证，优先低 token。"),
+            "low": (0, "低", 5, 3, 700, "只做必要定位、执行和一次关键验证，优先低 token。"),
+            "medium": (1, "中", 9, 5, 1100, "检查相关代码，完成实现并运行必要验证。"),
+            "high": (2, "高", 14, 7, 1700, "扩大相关代码搜索，检查相邻影响，并用测试验证修改。"),
+            "xhigh": (3, "Pro", 20, 8, 2400, "进行更全面的代码与资料搜索、边界检查和多项验证。"),
+            "max": (4, "Max", 28, 8, 3400, "进行充分定位、交叉检查、测试和结果复核；允许更长时间和更多 token。"),
+            "ultra": (5, "Ultra", 38, 8, 4800, "使用最高执行预算做深入搜索、实现、测试与复核，适合复杂且高风险的任务。"),
         }
         rank, label, turns, actions, output_tokens, instruction = profiles.get(level, profiles["medium"])
         return {"rank": rank, "label": label, "max_turns": turns, "max_actions": actions, "output_tokens": output_tokens, "instruction": instruction}
@@ -1048,8 +1059,8 @@ JSON 规则：phase 只能是 plan、update 或 summary；message 是直接给�
             "max_tokens": self._intelligence_profile(settings)["output_tokens"],
             "response_format": {"type": "json_object"},
         }
-        if settings.get("reasoning") != "none":
-            body["reasoning_effort"] = "xhigh" if settings.get("reasoning") == "max" else settings.get("reasoning", "medium")
+        effort = settings.get("reasoning", "medium")
+        body["reasoning_effort"] = "xhigh" if effort in {"max", "ultra"} else effort
         endpoint = self._api_endpoint(str(settings["base_url"]), "openai")
 
         def send(payload_body: dict[str, Any]) -> dict[str, Any]:
@@ -1131,7 +1142,24 @@ JSON 规则：phase 只能是 plan、update 或 summary；message 是直接给�
         try:
             value = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise RuntimeError("模型没有返回 Orbit Code 可执行的 JSON 协议；请换更强的模型或提高智能等级") from exc
+            # Some otherwise compatible providers wrap a valid JSON object in
+            # a short preamble or a reasoning tag even when JSON mode was
+            # requested. Recover the first complete object without accepting
+            # arbitrary prose as an executable protocol.
+            decoder = json.JSONDecoder()
+            value = None
+            for index, character in enumerate(text):
+                if character != "{":
+                    continue
+                try:
+                    candidate, _ = decoder.raw_decode(text[index:])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    value = candidate
+                    break
+            if value is None:
+                raise RuntimeError("模型没有返回 Orbit Code 可执行的 JSON 协议；请换更强的模型或提高智能等级") from exc
         if not isinstance(value, dict):
             raise RuntimeError("模型返回的 Orbit Code 协议不是对象")
         return value
@@ -1142,7 +1170,14 @@ JSON 规则：phase 只能是 plan、update 或 summary；message 是直接给�
             return {"tool": tool, "ok": False, "error": "不支持的工具"}
         summary = str(action.get("summary") or action.get("command") or action.get("path") or tool)
         permission = str(settings.get("permission", "ask"))
-        requires_approval = (tool in _WRITE_TOOLS and permission == "ask") or (tool == "computer" and permission != "full")
+        outside = self._action_may_leave_workspace(action, workspace)
+        high_risk = self._action_is_high_risk(action)
+        # Orbit's first-party web search is available in every mode. This does
+        # not grant arbitrary network access to shell subprocesses.
+        requires_approval = (
+            (permission == "ask" and outside)
+            or (permission == "workspace" and high_risk)
+        )
         if requires_approval:
             approval_id = secrets.token_hex(8)
             pending = {"id": approval_id, "summary": summary, "tool": tool, "decision": None}
@@ -1165,7 +1200,10 @@ JSON 规则：phase 只能是 plan、update 或 summary；message 是直接给�
         try:
             if tool == "computer" and settings.get("computer_control") is not True:
                 raise PermissionError("设置中尚未允许 Orbit Code 操控电脑")
-            output = self._execute(action, workspace, permission)
+            # Auto-review may approve a routine action outside the project. In
+            # Ask mode the same elevation only happens after the user approves.
+            elevated = permission == "full" or (outside and permission == "workspace") or requires_approval
+            output = self._execute(action, workspace, "full" if elevated else permission)
             result = {"tool": tool, "ok": True, "output": output[-20_000:], "duration_ms": _elapsed(started), "event_id": event["id"]}
             event.update(detail=result["output"] or "完成", status="completed", duration_ms=result["duration_ms"])
         except Exception as exc:
@@ -1174,6 +1212,72 @@ JSON 规则：phase 只能是 plan、update 或 summary；message 是直接给�
         with self._lock:
             self._save(row)
         return result
+
+    @staticmethod
+    def _action_may_leave_workspace(action: dict[str, Any], workspace: Path) -> bool:
+        tool = str(action.get("tool", ""))
+        if tool == "web_search":
+            return False
+        if tool == "computer":
+            return True
+        if tool == "shell":
+            command = str(action.get("command", ""))
+            if _NETWORK_SHELL.search(command) or "../" in command:
+                return True
+            try:
+                tokens = shlex.split(command)
+            except ValueError:
+                tokens = command.split()
+            for index, token in enumerate(tokens):
+                value = token.lstrip("<>|")
+                if not value.startswith("/") or value == "/dev/null":
+                    continue
+                # An absolute executable does not by itself grant access to an
+                # external file. Arguments and redirection targets still do.
+                if index == 0 and value.startswith(("/bin/", "/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/")):
+                    continue
+                path = Path(value).expanduser().resolve()
+                if path != workspace and workspace not in path.parents:
+                    return True
+            executable = tokens[0].lstrip("<>|") if tokens else ""
+            for value in re.findall(r"(?<![\w:])/(?!/)[^\s'\";|<>]+", command):
+                value = value.rstrip(")],")
+                if value in {"/dev/null", executable}:
+                    continue
+                path = Path(value).expanduser().resolve()
+                if path != workspace and workspace not in path.parents:
+                    return True
+            return False
+        if tool == "apply_patch":
+            for line in str(action.get("patch", "")).splitlines():
+                if not line.startswith(("+++ ", "--- ")):
+                    continue
+                value = line[4:].split("\t", 1)[0].strip()
+                if value == "/dev/null":
+                    continue
+                if value.startswith(("a/", "b/")):
+                    value = value[2:]
+                candidate = Path(value or ".").expanduser()
+                path = (candidate if candidate.is_absolute() else workspace / candidate).resolve()
+                if path != workspace and workspace not in path.parents:
+                    return True
+            return False
+        value = str(action.get("path", "."))
+        candidate = Path(value or ".").expanduser()
+        path = (candidate if candidate.is_absolute() else workspace / candidate).resolve()
+        return path != workspace and workspace not in path.parents
+
+    @staticmethod
+    def _action_is_high_risk(action: dict[str, Any]) -> bool:
+        tool = str(action.get("tool", ""))
+        if tool == "computer":
+            return True
+        if tool == "shell":
+            return bool(_BLOCKED_SHELL.search(str(action.get("command", ""))))
+        if tool == "apply_patch":
+            patch = str(action.get("patch", ""))
+            return "+++ /dev/null" in patch
+        return False
 
     @staticmethod
     def _resolve(workspace: Path, value: str, full: bool) -> Path:

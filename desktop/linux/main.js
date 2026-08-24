@@ -88,10 +88,10 @@ async function prepareOrbit() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 980,
-    minHeight: 640,
+    width: 1000,
+    height: 700,
+    minWidth: 820,
+    minHeight: 560,
     title: "Orbit",
     icon: path.join(process.resourcesPath, "orbit-logo.png"),
     backgroundColor: "#f5f5f7",

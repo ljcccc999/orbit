@@ -259,7 +259,8 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert '#content.code-page-active{overflow:hidden!important' in PAGE
     assert '#code .code-timeline{min-height:0;overflow-x:hidden;overflow-y:auto' in PAGE
     assert '.code-process-bar,.code-process-overview,.current-activity{display:none!important}' in PAGE
-    assert 'class="liquid-pill code-conversation-status"' in PAGE
+    assert '#codeProgress:not([hidden]){display:flex!important}' in PAGE
+    assert "function codeInlineProgress(){return''}" in PAGE
     assert 'class="code-process-inline" hidden' in PAGE
     assert 'id="composerAdvancedToggle"' in PAGE
     assert 'const codeSourceField=' in PAGE

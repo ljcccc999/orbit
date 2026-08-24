@@ -75,6 +75,41 @@ def test_code_creates_a_default_orbit_workspace_and_uses_shared_local_default(tm
     assert calls == [("hello", {"model_id": "orbit-local", "max_tokens": 16, "temperature": 0.8})]
 
 
+def test_permissions_keep_web_search_separate_from_shell_network_and_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    agent = _agent(tmp_path / "code")
+
+    assert agent._action_may_leave_workspace({"tool": "web_search", "query": "Orbit"}, workspace) is False
+    assert agent._action_may_leave_workspace({"tool": "shell", "command": "curl https://example.com"}, workspace) is True
+    assert agent._action_may_leave_workspace(
+        {"tool": "shell", "command": f"/bin/sh -c 'printf hello > {workspace / 'new.txt'}'"},
+        workspace,
+    ) is False
+    assert agent._action_may_leave_workspace(
+        {"tool": "shell", "command": f"printf hello > {outside}"},
+        workspace,
+    ) is True
+    assert agent._action_may_leave_workspace(
+        {"tool": "shell", "command": f"/bin/sh -c 'printf hello > {outside}'"},
+        workspace,
+    ) is True
+    assert agent._action_may_leave_workspace({"tool": "read_file", "path": str(outside)}, workspace) is True
+    assert agent._action_may_leave_workspace({"tool": "read_file", "path": "README.md"}, workspace) is False
+    assert agent._action_may_leave_workspace(
+        {"tool": "apply_patch", "patch": "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello"},
+        workspace,
+    ) is False
+    assert agent._action_may_leave_workspace(
+        {"tool": "apply_patch", "patch": f"--- /dev/null\n+++ {outside}\n@@ -0,0 +1 @@\n+hello"},
+        workspace,
+    ) is True
+    assert agent._action_is_high_risk({"tool": "shell", "command": "rm -rf build"}) is True
+    assert agent._action_is_high_risk({"tool": "apply_patch", "patch": "--- /dev/null\n+++ b/new.txt"}) is False
+
+
 def test_revert_changes_restores_only_the_archived_session_state(tmp_path):
     workspace = tmp_path / "project"
     workspace.mkdir()
@@ -149,7 +184,8 @@ def test_orbit_code_ui_contains_queue_progress_review_and_compact_tools():
     assert "session-spinner" in PAGE
     assert "对话历史" in PAGE
     assert "展开执行过程" in PAGE
-    assert '<label>智能 <span id="reasoningValue">标准</span>' in PAGE
+    assert '<label>智能 <span id="reasoningValue">中</span>' in PAGE
+    assert '<span>极高</span><span>最高</span><span>Ultra</span>' in PAGE
     assert "耗时和 token 也更多" in PAGE
     assert "renderThreeLevelCodeTimeline" in PAGE
     assert "code-stage" in PAGE
@@ -304,6 +340,17 @@ def test_web_search_results_keep_keyword_content_and_real_destination():
         "url": "https://example.com/doc",
         "snippet": "A searchable result summary.",
     }]
+
+
+def test_parse_reply_recovers_wrapped_json_object():
+    value = OrbitCodeAgent._parse_reply(
+        '<think>brief internal provider wrapper</think>\n'
+        '{"phase":"plan","message":"开始","actions":[],"done":false}\n'
+    )
+
+    assert value["phase"] == "plan"
+    assert value["message"] == "开始"
+    assert value["done"] is False
 
 
 def test_openai_compatible_api_retries_without_optional_fields(monkeypatch, tmp_path):

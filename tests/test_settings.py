@@ -8,6 +8,8 @@ def test_operational_settings_persist_with_safe_defaults(tmp_path):
         "prevent_sleep": False,
         "background_service": True,
         "computer_control": False,
+        "memory_enabled": True,
+        "memory_auto": True,
     }
     settings.update({"prevent_sleep": True, "background_service": False, "computer_control": True})
     assert OrbitSettings(tmp_path).get() == {
@@ -15,4 +17,6 @@ def test_operational_settings_persist_with_safe_defaults(tmp_path):
         "prevent_sleep": True,
         "background_service": False,
         "computer_control": True,
+        "memory_enabled": True,
+        "memory_auto": True,
     }

@@ -425,18 +425,21 @@ class Handler(BaseHTTPRequestHandler):
                     result = self.server.runtime.chat(
                         str(data.get("prompt", "")),
                         str(data["model"]),
-                        min(8, int(data.get("max_tokens", 128))),
+                        min(2048, max(1, int(data.get("max_tokens", 128)))),
                         float(data.get("temperature", 0.8)),
                     )
                 else:
                     result = self.server.runtime.code.chat_default(
                         str(data.get("prompt", "")),
-                        min(8, int(data.get("max_tokens", 128))),
+                        min(2048, max(1, int(data.get("max_tokens", 128)))),
                         float(data.get("temperature", 0.8)),
                     )
                 conversation_id = str(data.get("conversation_id", ""))
                 if conversation_id:
                     self.server.runtime.conversations.append_exchange(conversation_id, str(data.get("prompt", "")), str(result.get("content", "")))
+                memory_settings = self.server.runtime.settings.get()
+                if memory_settings.get("memory_enabled") and memory_settings.get("memory_auto"):
+                    self.server.runtime.memory.consider(str(data.get("prompt", "")))
                 self._json(200, result)
             elif path == "/v1/chat/completions":
                 if not self._require_api_key(str(data.get("model", "")) or None):
