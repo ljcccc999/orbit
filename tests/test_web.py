@@ -294,6 +294,15 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
     assert "function setCodeDefaultModel(key)" in PAGE
     assert "编辑本地模型" in PAGE
     assert "model-row-menu" in PAGE
+    assert "function openUnifiedModelLibrary()" in PAGE
+    assert "if(unifiedModelsReturnMode==='training'){showPage('models');setOrbitWorkspaceMode('training');return}" in PAGE
+    assert "setOrbitWorkspaceMode(unifiedModelsReturnMode)" in PAGE
+    assert "createFreshLaunchState" in PAGE
+    assert "revertCodeChanges" in PAGE
+    assert "确认撤销这次 Orbit Code" in PAGE
+    assert ".code-change-actions{" in PAGE
+    assert ".toolbar-nav{gap:6px;padding:0;border:0;background:transparent" in PAGE
+    assert ".product-letter,.product-mark{display:block!important" in PAGE
     assert 'font-family:"PingFang SC"' in PAGE
     assert '.product-letter{display:block' in PAGE
     assert '#codeApi.page.active{height:100%;min-height:0;overflow:hidden' in PAGE

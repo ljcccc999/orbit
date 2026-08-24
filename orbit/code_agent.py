@@ -55,6 +55,7 @@ class OrbitCodeAgent:
         self.attachments_root = self.root / "attachments"
         self.review_root = self.root / "review"
         self.plugins_root = self.root / "plugins"
+        self.workspace_root = self.root / "workspace"
         self.settings_path = self.root / "settings.json"
         self.memory_path = self.root / "memory.json"
         self.root.mkdir(parents=True, exist_ok=True)
@@ -62,6 +63,7 @@ class OrbitCodeAgent:
         self.attachments_root.mkdir(parents=True, exist_ok=True)
         self.review_root.mkdir(parents=True, exist_ok=True)
         self.plugins_root.mkdir(parents=True, exist_ok=True)
+        self.workspace_root.mkdir(parents=True, exist_ok=True)
         self._local_chat = local_chat
         self._list_local_models = list_local_models
         self._lock = threading.RLock()
@@ -69,8 +71,7 @@ class OrbitCodeAgent:
         self._workers: dict[str, threading.Thread] = {}
         self._stops: dict[str, threading.Event] = {}
 
-    @staticmethod
-    def _defaults() -> dict[str, Any]:
+    def _defaults(self) -> dict[str, Any]:
         return {
             "provider": "local",
             "base_url": "https://api.openai.com/v1",
@@ -80,7 +81,7 @@ class OrbitCodeAgent:
             "reasoning": "medium",
             "speed": "balanced",
             "permission": "ask",
-            "workspace": "",
+            "workspace": str(self.workspace_root),
             "capability": "3",
             "active_profile_id": "",
             "profiles": [],
@@ -359,6 +360,57 @@ class OrbitCodeAgent:
         if not path.is_file():
             raise FileNotFoundError("找不到 Orbit Code 会话")
         return json.loads(path.read_text(encoding="utf-8"))
+
+    def chat_default(self, prompt: str, max_tokens: int = 128, temperature: float = 0.8) -> dict[str, Any]:
+        """Answer an Orbit chat with the same default selected by the model library."""
+        settings = self._load_settings()
+        if settings.get("provider") != "api":
+            return self._local_chat(
+                prompt,
+                model_id=str(settings.get("model") or "") or None,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        if not settings.get("api_key"):
+            raise RuntimeError("默认 API 模型尚未保存 API Key")
+        system = "You are Orbit, an AI developed by YUNSH. Answer the user's conversation directly and naturally."
+        if settings.get("api_format") == "anthropic":
+            body = {
+                "model": settings["model"],
+                "system": system,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            request = urllib.request.Request(
+                self._api_endpoint(str(settings["base_url"]), "anthropic"),
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers={"x-api-key": str(settings["api_key"]), "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=180) as response:
+                payload = json.loads(response.read())
+            content = "".join(str(item.get("text", "")) for item in payload.get("content", []) if isinstance(item, dict))
+        else:
+            body = {
+                "model": settings["model"],
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            request = urllib.request.Request(
+                self._api_endpoint(str(settings["base_url"]), "openai"),
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers={"Authorization": f"Bearer {settings['api_key']}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=180) as response:
+                payload = json.loads(response.read())
+            choices = payload.get("choices") or []
+            content = str((choices[0].get("message") or {}).get("content", "")) if choices else ""
+        if not content.strip():
+            raise RuntimeError("默认 API 模型没有返回内容")
+        return {"model": settings["model"], "model_name": settings["model"], "content": content}
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
         prompt = str(payload.get("prompt", "")).strip()
@@ -697,6 +749,49 @@ class OrbitCodeAgent:
             raise ValueError("二进制文件不能在代码面板中显示") from exc
         return {"path": normalized, "status": change.get("status"), "content": content, "diff": change.get("diff", "")}
 
+    def revert_changes(self, session_id: str) -> dict[str, Any]:
+        """Restore only files still matching this session's archived after-state."""
+        with self._lock:
+            row = self.get(session_id)
+            if row.get("status") in _RUNNING:
+                raise ValueError("任务仍在运行，不能撤销修改")
+            if row.get("changes_reverted"):
+                raise ValueError("这次修改已经撤销")
+            workspace = Path(str(row.get("settings", {}).get("workspace", ""))).resolve()
+            changes = list(row.get("changes", {}).get("files", []))
+            conflicts: list[str] = []
+            for change in changes:
+                relative = str(change.get("path", ""))
+                candidate = (workspace / relative).resolve()
+                try:
+                    candidate.relative_to(workspace)
+                except ValueError:
+                    conflicts.append(relative)
+                    continue
+                current = candidate.read_bytes() if candidate.is_file() else None
+                current_hash = hashlib.sha256(current).hexdigest() if current is not None else None
+                if current_hash != change.get("after_sha256"):
+                    conflicts.append(relative)
+            if conflicts:
+                raise ValueError("这些文件在任务结束后又被修改，未撤销：" + "、".join(conflicts[:8]))
+            for change in changes:
+                relative = str(change["path"])
+                candidate = (workspace / relative).resolve()
+                before = self.review_root / session_id / "before" / relative
+                if change.get("before_sha256") is None:
+                    if candidate.exists():
+                        candidate.unlink()
+                else:
+                    if not before.is_file():
+                        raise ValueError(f"缺少 {relative} 的修改前副本，不能安全撤销")
+                    candidate.parent.mkdir(parents=True, exist_ok=True)
+                    candidate.write_bytes(before.read_bytes())
+            row["changes_reverted"] = True
+            row["reverted_at"] = _stamp()
+            self._event(row, "revert", title="已撤销文件修改", detail=f"已恢复 {len(changes)} 个文件", phase="summary")
+            self._save(row)
+            return json.loads(json.dumps(row))
+
     def _consume_directives(self, row: dict[str, Any], mode: str) -> list[str]:
         with self._lock:
             values = []
@@ -716,10 +811,17 @@ class OrbitCodeAgent:
         system_roots = {"/System", "/private", "/Library", "/Applications", "/usr", "/opt", "/Volumes", "/cores", "/dev", "/sbin", "/bin", "/etc", "/var", "/tmp", "/Network", "/home", "/nix", "/snap"}
         total = 0
         count = 0
+        dirs_seen = 0
+        deadline = time.monotonic() + 5.0  # never scan the disk for long
         for root, dirs, files in os.walk(workspace):
+            if time.monotonic() > deadline:
+                break
             dirs[:] = [name for name in dirs if name not in ignored]
             if str(workspace) == "/":
                 dirs[:] = [name for name in dirs if str(Path(workspace) / name) not in system_roots]
+            dirs_seen += 1
+            if dirs_seen > 4_000:
+                break
             for name in files:
                 path = Path(root) / name
                 try:

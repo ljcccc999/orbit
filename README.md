@@ -16,6 +16,9 @@
 - Generate training data locally, with or without AI assistance
 - Run local inference and an OpenAI-compatible local API (`/v1/chat/completions`, `/v1/responses`)
 - Collaborate through reviewed contribution packages and the optional Orbit Hub
+- Use one ordered model library across Orbit chat and Orbit Code: API and local models share the same default, while Training keeps its dedicated local-model controls
+- Reopen directly into a fresh conversation and an automatically created Orbit workspace; full-access sessions may still work outside that workspace
+- Inspect every completed Orbit Code answer through its file-change card, then review the diff or confirm a conflict-checked undo
 
 ## Product surfaces
 

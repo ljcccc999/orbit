@@ -371,6 +371,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.runtime.code.approve(path.split("/")[4], data.get("approved") is True))
             elif path.startswith("/api/code/sessions/") and path.endswith("/stop"):
                 self._json(202, self.server.runtime.code.stop(path.split("/")[4]))
+            elif path.startswith("/api/code/sessions/") and path.endswith("/revert"):
+                self._json(200, self.server.runtime.code.revert_changes(path.split("/")[4]))
             elif path.startswith("/api/code/sessions/") and path.endswith("/guide"):
                 self._json(202, self.server.runtime.code.guide(
                     path.split("/")[4], str(data.get("prompt", "")), str(data.get("mode", "queue")),
@@ -419,12 +421,19 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/keys/revoke":
                 self._json(200, self.server.runtime.revoke_api_key(str(data.get("id", ""))))
             elif path == "/api/chat":
-                result = self.server.runtime.chat(
-                    str(data.get("prompt", "")),
-                    str(data["model"]) if data.get("model") else None,
-                    min(8, int(data.get("max_tokens", 128))),
-                    float(data.get("temperature", 0.8)),
-                )
+                if data.get("model"):
+                    result = self.server.runtime.chat(
+                        str(data.get("prompt", "")),
+                        str(data["model"]),
+                        min(8, int(data.get("max_tokens", 128))),
+                        float(data.get("temperature", 0.8)),
+                    )
+                else:
+                    result = self.server.runtime.code.chat_default(
+                        str(data.get("prompt", "")),
+                        min(8, int(data.get("max_tokens", 128))),
+                        float(data.get("temperature", 0.8)),
+                    )
                 conversation_id = str(data.get("conversation_id", ""))
                 if conversation_id:
                     self.server.runtime.conversations.append_exchange(conversation_id, str(data.get("prompt", "")), str(result.get("content", "")))

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import urllib.error
@@ -56,6 +57,45 @@ def test_code_model_order_is_persisted_for_api_and_local_models(tmp_path):
     assert updated["model_order"] == ["local:orbit-local", api_key]
     assert updated["provider"] == "local"
     assert updated["model"] == "orbit-local"
+
+
+def test_code_creates_a_default_orbit_workspace_and_uses_shared_local_default(tmp_path):
+    calls = []
+
+    def local_chat(prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        return {"model": kwargs.get("model_id"), "content": "ok"}
+
+    agent = OrbitCodeAgent(tmp_path, local_chat, lambda: [{"id": "orbit-local", "name": "Orbit Local"}])
+    settings = agent.public_settings()
+    assert Path(settings["workspace"]).is_dir()
+    assert Path(settings["workspace"]).name == "workspace"
+    result = agent.chat_default("hello", max_tokens=16)
+    assert result["content"] == "ok"
+    assert calls == [("hello", {"model_id": "orbit-local", "max_tokens": 16, "temperature": 0.8})]
+
+
+def test_revert_changes_restores_only_the_archived_session_state(tmp_path):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    target = workspace / "hello.txt"
+    target.write_text("before\n", encoding="utf-8")
+    agent = _agent(tmp_path / "code")
+    session_id = "f" * 24
+    before = target.read_bytes()
+    target.write_text("after\n", encoding="utf-8")
+    after = target.read_bytes()
+    row = {
+        "id": session_id, "status": "completed", "settings": {"workspace": str(workspace)},
+        "changes": {"files": [{"path": "hello.txt", "status": "modified", "before_sha256": hashlib.sha256(before).hexdigest(), "after_sha256": hashlib.sha256(after).hexdigest()}]},
+        "events": [], "updated_at": "",
+    }
+    agent._sessions[session_id] = row
+    agent._archive_review_files(row, {"hello.txt": before}, workspace)
+    agent._save(row)
+    restored = agent.revert_changes(session_id)
+    assert target.read_text(encoding="utf-8") == "before\n"
+    assert restored["changes_reverted"] is True
 
 
 def test_promoted_guidance_cannot_be_cancelled(tmp_path):

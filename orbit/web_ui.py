@@ -262,6 +262,8 @@ $('navigateBack').onclick=()=>{if(orbitPageIndex<=0)return;orbitNavigatingHistor
 $('navigateForward').onclick=()=>{if(orbitPageIndex>=orbitPageHistory.length-1)return;orbitNavigatingHistory=true;orbitPageIndex++;showPage(orbitPageHistory[orbitPageIndex]);orbitNavigatingHistory=false;updateOrbitNavigation()};
 function codeInlineProgress(row){const p=row.progress||{},c=row.changes||{},total=Math.max(p.total||0,p.completed||0),deg=total?Math.min(360,(p.completed||0)/total*360):0;return`<div class="liquid-pill code-conversation-status"><span class="step-ring" style="--progress:${deg}deg"></span><b>${p.completed||0}/${total}</b><button class="change-inline del" onclick="openReview('deleted')">−${c.deletions||0} · ${c.files_changed||0} 文件</button><button class="change-inline add" onclick="openReview('added')">+${c.additions||0} · ${c.files_changed||0} 文件</button></div>`}
 function codeCompletedFiles(row){const files=row?.changes?.files||[];if(!files.length)return'';return`<div class="completed-files">${files.map(file=>`<button class="completed-file ${file.status||'modified'}" onclick="openCodeFile('${String(file.path||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')"><span>${file.status==='added'?'+':file.status==='deleted'?'−':'↗'}</span><b>${esc(file.path||'文件')}</b><small>${file.status==='added'?'新建':file.status==='deleted'?'删除':'已修改'} · 点击预览</small></button>`).join('')}</div>`}
+function codeChangeActions(row){const c=row?.changes||{},count=Number(c.files_changed||0);if(!count)return'';const label=`${c.additions?'新增 '+c.additions+' 行 · ':''}${c.deletions?'删除 '+c.deletions+' 行 · ':''}${count} 个文件`;return`<div class="code-change-actions"><button class="code-change-summary" onclick="openReview('all')"><span>▣</span><b>${esc(label)}</b></button><div><button ${row.changes_reverted?'disabled':''} onclick="revertCodeChanges()">${row.changes_reverted?'已撤销':'撤销 ↶'}</button><button onclick="openReview('all')">审核</button></div></div>`}
+async function revertCodeChanges(){if(!currentCodeSession)return;if(!await actionConfirm('确认撤销这次 Orbit Code 对文件所做的全部修改？撤销前会检查文件是否又被改过。'))return;try{const row=await request(`/api/code/sessions/${currentCodeSession}/revert`,{method:'POST',body:'{}'});renderCodeSession(row);toast('已安全撤销文件修改。')}catch(e){toast(e.message)}}
 function toggleInlineCodeProcess(button){const body=button.parentElement.querySelector('.code-process-inline'),expanded=!body.hidden;body.hidden=expanded;button.setAttribute('aria-expanded',String(!expanded));button.lastElementChild.textContent=expanded?'›':'⌄'}
 renderCodeProcessState=function(){const timeline=$('codeTimeline');if(timeline)timeline.classList.remove('process-collapsed')};
 const _orbitConversationRenderSession=renderCodeSession;
@@ -271,7 +273,7 @@ renderCodeSession=function(row){
   const running=codeIsRunning(row),events=row.events||[],summary=[...events].reverse().find(e=>e.kind==='assistant'&&e.phase==='summary'),full=renderThreeLevelCodeTimeline(row)||'<div class="code-empty"><div><b>正在开始</b><span>Orbit Code 正在理解任务。</span></div></div>';
   if(running){timeline.innerHTML=full+codeInlineProgress(row)}else{
     const summaryHtml=summary?`<div class="code-final-summary">${esc(summary.detail||summary.title||'')}</div>`:'';
-    timeline.innerHTML=`<button class="code-elapsed" aria-expanded="false" onclick="toggleInlineCodeProcess(this)"><span>${currentLang==='zh'?'用时 ':'Time '}${formatCodeElapsed(row.duration_ms||0)}</span><span>›</span></button>${summaryHtml}${codeCompletedFiles(row)}<div class="code-process-inline" hidden>${full}${codeInlineProgress(row)}</div>`;
+    timeline.innerHTML=`<button class="code-elapsed" aria-expanded="false" onclick="toggleInlineCodeProcess(this)"><span>${currentLang==='zh'?'用时 ':'Time '}${formatCodeElapsed(row.duration_ms||0)}</span><span>›</span></button>${summaryHtml}${codeChangeActions(row)}${codeCompletedFiles(row)}<div class="code-process-inline" hidden>${full}${codeInlineProgress(row)}</div>`;
   }
   timeline.classList.remove('process-collapsed');
   if(running&&wasNearBottom)requestAnimationFrame(()=>{timeline.scrollTop=timeline.scrollHeight});
@@ -489,11 +491,11 @@ function configureContextualSidebar(mode){
   orbitSidebar.classList.remove('mode-orbit','mode-training','mode-code');
   orbitSidebar.classList.add('mode-'+mode);
   const labels={
-    orbit:{chat:['◉','新对话','New chat'],plugins:['✦','插件','Plugins'],models:['◇','模型','Models'],api:['⌘','API','API']},
-    training:{chat:['＋','新训练','New training'],models:['◇','模型','Models'],community:['◎','协作','Collaboration'],api:['⌘','API','API']},
+    orbit:{chat:['◉','新对话','New chat'],plugins:['✦','插件','Plugins'],models:['◇','API 与模型','API & models']},
+    training:{chat:['＋','新训练','New training'],models:['◇','本地模型','Local models'],community:['◎','协作','Collaboration'],api:['⌘','API','API']},
     code:{chat:['＋','新对话','New chat'],plugins:['✦','插件','Plugins'],api:['⌘','API 与模型','API & models']}
   }[mode];
-  Object.entries(labels).forEach(([page,value])=>{const button=orbitSidebar.querySelector(`.nav button[data-page="${page}"]`);if(!button)return;button.querySelector('.icon').textContent=value[0];button.querySelector('span:last-child').textContent=currentLang==='zh'?value[1]:value[2]});
+  Object.entries(labels).forEach(([page,value])=>{const button=orbitSidebar.querySelector(`.nav button[data-page="${page}"]`);if(!button)return;button.querySelector('.icon').textContent=value[0];const text=button.querySelector('span:last-child');text.removeAttribute('data-i18n');text.textContent=currentLang==='zh'?value[1]:value[2]});
 }
 const _orbitModeSidebar=setOrbitWorkspaceMode;
 setOrbitWorkspaceMode=function(mode){_orbitModeSidebar(mode);configureContextualSidebar(mode)};
@@ -1452,6 +1454,47 @@ function applyChatModelDefault(){const el=document.getElementById('chatModel'),d
 const _orbitRefreshSystemChatModel=refreshSystem;refreshSystem=async function(){const result=await _orbitRefreshSystemChatModel();applyChatModelDefault();return result};
 (async()=>{try{codeSettings=await request('/api/code/settings');applyChatModelDefault()}catch(e){}})();
 Object.assign(EN,{uploadHub:'Upload to Hub'});Object.assign(ZH,{uploadHub:'上传到 Hub'});
+''' + "</script></body></html>",
+    1,
+)
+
+# ===== 2026-08-24 统一模型入口、无重叠玻璃层与自动新会话 =====
+# The former local-only model page remains in the static template for backward
+# compatibility, but has no navigation entry. Every Models button opens the
+# unified API/local library without changing the current Orbit/Training/Code
+# workspace context.
+PAGE = PAGE.replace(
+    "</style>",
+    r"""
+.product-menu{left:3px;width:calc(100% - 6px);padding:6px;border-radius:14px;background:rgba(244,247,251,.76);backdrop-filter:blur(34px) saturate(185%);box-shadow:none}
+.product-choice{grid-template-columns:20px minmax(0,1fr);padding:9px 8px;border-radius:10px}
+.product-letter,.product-mark{display:block!important;width:20px!important;height:auto!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;text-align:left!important}
+.toolbar-nav{gap:6px;padding:0;border:0;background:transparent;backdrop-filter:none;box-shadow:none}
+.toolbar-nav:before{display:none!important}
+.toolbar-nav button{width:32px;height:30px;border:1px solid rgba(255,255,255,.88)!important;border-radius:10px;background:linear-gradient(145deg,rgba(255,255,255,.76),rgba(232,238,246,.48));backdrop-filter:blur(24px) saturate(190%);box-shadow:none}
+.toolbar-nav button+button{border-left:1px solid rgba(255,255,255,.88)!important}
+.toolbar-nav button:hover:not(:disabled){background:rgba(255,255,255,.84);box-shadow:none}
+#code .panel,#codeApi .model-library-card{box-shadow:none}
+.model-row-menu{box-shadow:none}
+.code-change-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;padding:11px 12px;border:1px solid rgba(220,225,233,.9);border-radius:14px;background:rgba(255,255,255,.58);backdrop-filter:blur(22px) saturate(170%)}
+.code-change-summary{display:flex;align-items:center;gap:10px;min-width:0;border:0;background:transparent;color:var(--ink);text-align:left}.code-change-summary span{font-size:18px;color:var(--muted)}.code-change-summary b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.code-change-actions>div{display:flex;gap:7px}.code-change-actions>div button{padding:6px 10px;border:1px solid rgba(213,219,228,.9);border-radius:9px;background:rgba(255,255,255,.72);color:var(--ink)}
+.sidebar.mode-orbit>.nav button[data-page="api"]{display:none!important}
+@media(prefers-reduced-transparency:reduce){.product-menu,.toolbar-nav button{background:#f3f5f8;backdrop-filter:none}}
+""" + "</style>",
+    1,
+)
+PAGE = PAGE.replace(
+    "</script></body></html>",
+    r'''
+let unifiedModelsReturnMode='orbit';
+function openUnifiedModelLibrary(){unifiedModelsReturnMode=orbitWorkspaceMode||'orbit';if(unifiedModelsReturnMode==='training'){showPage('models');setOrbitWorkspaceMode('training');return}showPage('codeApi');setOrbitWorkspaceMode(unifiedModelsReturnMode)}
+document.querySelectorAll('[data-product-page]').forEach(button=>{button.onclick=()=>{const page=button.dataset.productPage,mode=page==='train'?'training':page==='code'?'code':'orbit';showPage(page);setOrbitWorkspaceMode(mode);$('productMenu').hidden=true}});
+document.querySelectorAll('.sidebar>.nav button[data-page="models"]').forEach(button=>{button.onclick=e=>{e.preventDefault();e.stopPropagation();openUnifiedModelLibrary()}});
+$('backToCode').onclick=()=>{const target=unifiedModelsReturnMode==='training'?'train':unifiedModelsReturnMode==='code'?'code':'chat';showPage(target);setOrbitWorkspaceMode(unifiedModelsReturnMode)};
+async function createFreshLaunchState(){await newConversation();const required=['codeSessionTitle','codeSessionMeta','codeTimeline','codeProgress','codeGuideMode','codePrompt'];if(required.every(id=>$(id)))newCodeSession()}
+document.addEventListener('keydown',event=>{if(event.target?.id==='codePrompt'&&event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();event.stopImmediatePropagation();sendCodePrompt()}},true);
+const _orbitUserToast=toast;toast=function(message){const value=String(message||'');if(/Cannot set properties of null|Cannot read properties of null/.test(value)){console.error('Orbit optional interface element:',value);return}_orbitUserToast(value)};
+setTimeout(()=>createFreshLaunchState().catch(e=>console.error('Orbit launch state:',e)),0);
 ''' + "</script></body></html>",
     1,
 )
