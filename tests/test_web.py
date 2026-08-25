@@ -34,7 +34,7 @@ def test_fullscreen_code_turn_ruler_centers_transcript_and_previews_full_turn():
     assert "body.orbit-window-maximized #code #codeTimeline" in PAGE
     assert "calc((100% - 900px)/2)" in PAGE
     assert "const ruler=document.getElementById('orbitTurnRuler')" in PAGE
-    assert "data-code-user-prompt" in PAGE
+    assert "data-code-user-message" in PAGE
     assert "你：${question}" in PAGE
     assert "Orbit：${answer}" in PAGE
     assert "white-space:pre-wrap!important" in PAGE
@@ -321,12 +321,14 @@ def test_orbit_code_uses_one_scrollable_conversation_shell():
 
 def test_orbit_code_keeps_original_user_prompt_in_timeline():
     # Code sessions persist the initial request separately from execution
-    # events. The UI must render that field as the first, scrollable message;
-    # otherwise a reopened session contains only the agent's tool trace.
-    assert "row?.prompt" in PAGE
-    assert 'data-code-user-prompt="1"' in PAGE
-    assert "timeline.insertAdjacentHTML('afterbegin',renderPrompt(row))" in PAGE
-    assert '#code .code-user-prompt{display:flex!important;justify-content:flex-end!important' in PAGE
+    # events. The UI must render that field once as a user bubble at the top
+    # (outside the collapsible process trace); guidance messages reuse the
+    # same user-bubble style, so nothing may re-add a second prompt block.
+    assert "data-code-user-message" in PAGE
+    assert "event.kind==='user'){i++;continue}" in PAGE
+    assert 'data-code-user-prompt="1"' not in PAGE
+    assert "timeline.insertAdjacentHTML('afterbegin',renderPrompt(row))" not in PAGE
+    assert 'data-code-user-prompt' not in PAGE
     assert '#code .agent-event.assistant{width:100%!important;max-width:none!important' in PAGE
     assert '#code .code-process-inline .event-card' in PAGE
     assert '#code .code-final-summary,#code .code-stage-message,#code .code-stage{width:100%!important;max-width:none!important' in PAGE
